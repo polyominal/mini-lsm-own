@@ -1,0 +1,23 @@
+name: Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  RUSTFLAGS: "-Dwarnings"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Format check
+        run: cargo fmt --package mini-lsm-starter --check
+      - name: Clippy
+        run: cargo clippy --package mini-lsm-starter
+      - name: Test
+        run: cargo test --package mini-lsm-starter
