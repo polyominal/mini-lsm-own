@@ -31,6 +31,9 @@ use crate::key::KeySlice;
 use crate::table::SsTableBuilder;
 use crate::wal::Wal;
 
+/// A default (whatever that means) for key-value entries.
+const DEFAULT_ENTRY: (Bytes, Bytes) = (Bytes::from_static(&[]), Bytes::from_static(&[]));
+
 /// A basic mem-table based on crossbeam-skiplist.
 ///
 /// An initial implementation of memtable is part of week 1, day 1. It will be incrementally implemented in other
@@ -126,8 +129,18 @@ impl MemTable {
     }
 
     /// Get an iterator over a range of keys.
-    pub fn scan(&self, _lower: Bound<&[u8]>, _upper: Bound<&[u8]>) -> MemTableIterator {
-        unimplemented!()
+    pub fn scan(&self, lower: Bound<&[u8]>, upper: Bound<&[u8]>) -> MemTableIterator {
+        let mut iter = MemTableIteratorBuilder {
+            map: Arc::clone(&self.map),
+            iter_builder: |map| map.range((map_bound(lower), map_bound(upper))),
+            item: DEFAULT_ENTRY,
+        }
+        .build();
+
+        // initialize the iterator
+        iter.next().unwrap();
+
+        iter
     }
 
     /// Flush the mem-table to SSTable. Implement in week 1 day 6.
@@ -173,18 +186,28 @@ impl StorageIterator for MemTableIterator {
     type KeyType<'a> = KeySlice<'a>;
 
     fn value(&self) -> &[u8] {
-        unimplemented!()
+        self.borrow_item().1.as_ref()
     }
 
     fn key(&'_ self) -> KeySlice<'_> {
-        unimplemented!()
+        KeySlice::from_slice(self.borrow_item().0.as_ref())
     }
 
     fn is_valid(&self) -> bool {
-        unimplemented!()
+        !self.borrow_item().0.is_empty()
     }
 
     fn next(&mut self) -> Result<()> {
-        unimplemented!()
+        // advance the iterator and fetch the next key-value pair
+        let next_item = self.with_iter_mut(|iter| {
+            iter.next()
+                .map(|e| (e.key().clone(), e.value().clone()))
+                .unwrap_or_else(|| DEFAULT_ENTRY)
+        });
+
+        // cache the pair
+        self.with_item_mut(|item| *item = next_item);
+
+        Ok(())
     }
 }
