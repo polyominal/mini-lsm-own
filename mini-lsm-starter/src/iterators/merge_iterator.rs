@@ -17,6 +17,7 @@
 
 use std::cmp::{self};
 use std::collections::BinaryHeap;
+use std::collections::binary_heap::PeekMut;
 
 use anyhow::Result;
 
@@ -53,13 +54,23 @@ impl<I: StorageIterator> Ord for HeapWrapper<I> {
 /// Merge multiple iterators of the same type. If the same key occurs multiple times in some
 /// iterators, prefer the one with smaller index.
 pub struct MergeIterator<I: StorageIterator> {
+    /// A heap that keeps all valid iterators.
     iters: BinaryHeap<HeapWrapper<I>>,
     current: Option<HeapWrapper<I>>,
 }
 
 impl<I: StorageIterator> MergeIterator<I> {
     pub fn create(iters: Vec<Box<I>>) -> Self {
-        unimplemented!()
+        let mut iters = BinaryHeap::from(
+            iters
+                .into_iter()
+                .filter(|iter| iter.is_valid())
+                .enumerate()
+                .map(|(i, iter)| HeapWrapper(i, iter))
+                .collect::<Vec<_>>(),
+        );
+        let current = iters.pop();
+        Self { iters, current }
     }
 }
 
@@ -69,18 +80,56 @@ impl<I: 'static + for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>> StorageIt
     type KeyType<'a> = KeySlice<'a>;
 
     fn key(&'_ self) -> KeySlice<'_> {
-        unimplemented!()
+        self.current.as_ref().unwrap().1.key()
     }
 
     fn value(&self) -> &[u8] {
-        unimplemented!()
+        self.current.as_ref().unwrap().1.value()
     }
 
     fn is_valid(&self) -> bool {
-        unimplemented!()
+        self.current.is_some()
     }
 
     fn next(&mut self) -> Result<()> {
-        unimplemented!()
+        debug_assert!(
+            self.is_valid(),
+            "calling next() on an invalid MergeIterator"
+        );
+
+        let current = self.current.as_mut().unwrap();
+
+        // consume all items in the heap that has the same key as that in current's
+        while let Some(mut heap_iter) = self.iters.peek_mut() {
+            debug_assert!(current.1.key() <= heap_iter.1.key());
+
+            if heap_iter.1.key() != current.1.key() {
+                break;
+            }
+
+            // handle error from calling next()
+            if let e @ Err(_) = heap_iter.1.next() {
+                PeekMut::pop(heap_iter);
+                return e;
+            }
+
+            // invariant: all iterators in the heap are valid
+            if !heap_iter.1.is_valid() {
+                PeekMut::pop(heap_iter);
+            }
+        }
+
+        // advance the iterator in current
+        current.1.next()?;
+
+        // put current back into the heap
+        if current.1.is_valid() {
+            self.iters.push(self.current.take().unwrap());
+        }
+
+        // refresh current item
+        self.current = self.iters.pop();
+
+        Ok(())
     }
 }
