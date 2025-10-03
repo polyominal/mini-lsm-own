@@ -301,15 +301,15 @@ impl LsmStorageInner {
 
     /// Get a key from the storage. In day 7, this can be further optimized by using a bloom filter.
     pub fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
-        let guard = self.state.read();
+        let snapshot = Arc::clone(&self.state.read());
 
         // check current memtable
-        if let Some(value) = guard.memtable.get(key) {
+        if let Some(value) = snapshot.memtable.get(key) {
             return Ok(if !value.is_empty() { Some(value) } else { None });
         }
 
         // check immutable memtables
-        for memtable in &guard.imm_memtables {
+        for memtable in &snapshot.imm_memtables {
             if let Some(value) = memtable.get(key) {
                 return Ok(if !value.is_empty() { Some(value) } else { None });
             }
@@ -325,13 +325,10 @@ impl LsmStorageInner {
 
     /// Put a key-value pair into the storage by writing into the current memtable.
     pub fn put(&self, key: &[u8], value: &[u8]) -> Result<()> {
-        let size_snapshot = {
-            let guard = self.state.read();
-            guard.memtable.put(key, value)?;
-            guard.memtable.approximate_size()
-        };
+        let snapshot = Arc::clone(&self.state.read());
+        snapshot.memtable.put(key, value)?;
 
-        self.check_freeze(size_snapshot)
+        self.check_freeze(snapshot.memtable.approximate_size())
     }
 
     /// Remove a key from the storage by writing an empty value.
@@ -419,6 +416,7 @@ impl LsmStorageInner {
     ) -> Result<FusedIterator<LsmIterator>> {
         let snapshot = Arc::clone(&self.state.read());
 
+        // collect MemTableIterators from current memtable + the list of immutable memtables
         let iters = iter::once(&snapshot.memtable)
             .chain(snapshot.imm_memtables.iter())
             .map(|memtable| Box::new(memtable.scan(lower, upper)))
