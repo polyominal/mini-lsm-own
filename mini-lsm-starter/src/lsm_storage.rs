@@ -417,22 +417,13 @@ impl LsmStorageInner {
         lower: Bound<&[u8]>,
         upper: Bound<&[u8]>,
     ) -> Result<FusedIterator<LsmIterator>> {
-        let snapshot = {
-            let guard = self.state.read();
-            Arc::clone(&guard)
-        };
+        let snapshot = Arc::clone(&self.state.read());
 
-        Ok(FusedIterator::new(LsmIterator::new(
-            MergeIterator::create(
-                iter::once(Box::new(snapshot.memtable.scan(lower, upper)))
-                    .chain(
-                        snapshot
-                            .imm_memtables
-                            .iter()
-                            .map(|memtable| Box::new(memtable.scan(lower, upper))),
-                    )
-                    .collect(),
-            ),
-        )?))
+        let iters = iter::once(&snapshot.memtable)
+            .chain(snapshot.imm_memtables.iter())
+            .map(|memtable| Box::new(memtable.scan(lower, upper)))
+            .collect();
+
+        LsmIterator::new(MergeIterator::create(iters)).map(FusedIterator::new)
     }
 }
