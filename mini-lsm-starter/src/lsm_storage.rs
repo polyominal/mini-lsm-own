@@ -16,6 +16,7 @@
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
 use std::collections::HashMap;
+use std::iter;
 use std::mem;
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
@@ -421,17 +422,17 @@ impl LsmStorageInner {
             Arc::clone(&guard)
         };
 
-        let mut iters = Vec::with_capacity(1 + snapshot.imm_memtables.len());
-        iters.push(Box::new(snapshot.memtable.scan(lower, upper)));
-        iters.extend(
-            snapshot
-                .imm_memtables
-                .iter()
-                .map(|memtable| Box::new(memtable.scan(lower, upper))),
-        );
-
         Ok(FusedIterator::new(LsmIterator::new(
-            MergeIterator::create(iters),
+            MergeIterator::create(
+                iter::once(Box::new(snapshot.memtable.scan(lower, upper)))
+                    .chain(
+                        snapshot
+                            .imm_memtables
+                            .iter()
+                            .map(|memtable| Box::new(memtable.scan(lower, upper))),
+                    )
+                    .collect(),
+            ),
         )?))
     }
 }
