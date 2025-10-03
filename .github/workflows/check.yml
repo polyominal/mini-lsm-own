@@ -1,13 +1,10 @@
-name: Check
+name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-
-env:
-  RUSTFLAGS: "-Dwarnings"
 
 jobs:
   check:
@@ -18,6 +15,8 @@ jobs:
       - name: Format check
         run: cargo fmt --package mini-lsm-starter --check
       - name: Clippy
+        env:
+          RUSTFLAGS: "-Dwarnings"
         run: cargo clippy --package mini-lsm-starter
       - name: Test
         run: cargo test --package mini-lsm-starter
