@@ -57,7 +57,7 @@ impl StorageIterator for SsTableIterator {
     type KeyType<'a> = KeySlice<'a>;
 
     /// Return the `key` that's held by the underlying block iterator.
-    fn key(&'_ self) -> KeySlice<'_> {
+    fn key(&self) -> KeySlice<'_> {
         unimplemented!()
     }
 
