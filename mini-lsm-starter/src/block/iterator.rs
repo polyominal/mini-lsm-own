@@ -113,13 +113,9 @@ impl BlockIterator {
         let mut hi = num_elements;
         while lo < hi {
             let idx = (lo + hi - 1) / 2;
-            assert!(idx < num_elements);
+            debug_assert!(idx < num_elements);
 
-            let entry_start = self.block.offsets[idx] as usize;
-
-            let key_start = entry_start + LEN_U16;
-            let key_len = (&self.block.data[entry_start..key_start]).get_u16() as usize;
-            let key_end = key_start + key_len;
+            let ((key_start, key_end), _) = self.parse_entry(idx);
             let key_idx = KeySlice::from_slice(&self.block.data[key_start..key_end]);
 
             if key_idx.cmp(&key) == Ordering::Less {
@@ -146,19 +142,32 @@ impl BlockIterator {
         // set idx
         self.idx = idx;
 
-        let entry_start = self.block.offsets[idx] as usize;
+        // parse entry
+        let ((key_start, key_end), (value_start, value_end)) = self.parse_entry(idx);
 
         // set key
-        let key_start = entry_start + LEN_U16;
-        let key_len = (&self.block.data[entry_start..key_start]).get_u16() as usize;
-        let key_end = key_start + key_len;
-        let key = KeySlice::from_slice(&self.block.data[key_start..key_end]);
-        self.key.set_from_slice(key);
+        self.key
+            .set_from_slice(KeySlice::from_slice(&self.block.data[key_start..key_end]));
 
         // set value range
+        self.value_range = (value_start, value_end);
+    }
+
+    /// Given the starting offset of some entry, parses and returns ((key start, key end), (value start, value end)).
+    fn parse_entry_inner(&self, offset: usize) -> ((usize, usize), (usize, usize)) {
+        let key_start = offset + LEN_U16;
+        let key_len = (&self.block.data[offset..key_start]).get_u16() as usize;
+        let key_end = key_start + key_len;
+
         let value_start = key_end + LEN_U16;
         let value_len = (&self.block.data[key_end..value_start]).get_u16() as usize;
         let value_end = value_start + value_len;
-        self.value_range = (value_start, value_end);
+
+        ((key_start, key_end), (value_start, value_end))
+    }
+
+    /// Parses the entry given index.
+    fn parse_entry(&self, idx: usize) -> ((usize, usize), (usize, usize)) {
+        self.parse_entry_inner(self.block.offsets[idx] as usize)
     }
 }
