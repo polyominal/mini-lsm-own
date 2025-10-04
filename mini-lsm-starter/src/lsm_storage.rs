@@ -16,6 +16,7 @@
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
 use std::collections::HashMap;
+use std::iter;
 use std::mem;
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
@@ -300,16 +301,16 @@ impl LsmStorageInner {
 
     /// Get a key from the storage. In day 7, this can be further optimized by using a bloom filter.
     pub fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
-        let guard = self.state.read();
+        let snapshot = Arc::clone(&self.state.read());
 
         // check current memtable
-        if let Some(value) = guard.memtable.get(key) {
+        if let Some(value) = snapshot.memtable.get(key) {
             return Ok(if !value.is_empty() { Some(value) } else { None });
         }
 
         // check immutable memtables
-        for memtable in &guard.imm_memtables {
-            if let Some(value) = memtable.get(key) {
+        for table in &snapshot.imm_memtables {
+            if let Some(value) = table.get(key) {
                 return Ok(if !value.is_empty() { Some(value) } else { None });
             }
         }
@@ -324,13 +325,10 @@ impl LsmStorageInner {
 
     /// Put a key-value pair into the storage by writing into the current memtable.
     pub fn put(&self, key: &[u8], value: &[u8]) -> Result<()> {
-        let size_snapshot = {
-            let guard = self.state.read();
-            guard.memtable.put(key, value)?;
-            guard.memtable.approximate_size()
-        };
+        let snapshot = Arc::clone(&self.state.read());
+        snapshot.memtable.put(key, value)?;
 
-        self.check_freeze(size_snapshot)
+        self.check_freeze(snapshot.memtable.approximate_size())
     }
 
     /// Remove a key from the storage by writing an empty value.
@@ -371,11 +369,7 @@ impl LsmStorageInner {
         // so it might be full. acquire the state lock and force freeze
         let state_lock = self.state_lock.lock();
 
-        let guard = self.state.read();
-        let do_freeze = self.should_freeze(guard.memtable.approximate_size());
-        drop(guard);
-
-        if do_freeze {
+        if self.should_freeze(self.state.read().memtable.approximate_size()) {
             self.force_freeze_memtable(&state_lock)
         } else {
             Ok(())
@@ -416,22 +410,14 @@ impl LsmStorageInner {
         lower: Bound<&[u8]>,
         upper: Bound<&[u8]>,
     ) -> Result<FusedIterator<LsmIterator>> {
-        let snapshot = {
-            let guard = self.state.read();
-            Arc::clone(&guard)
-        };
+        let snapshot = Arc::clone(&self.state.read());
 
-        let mut iters = Vec::with_capacity(1 + snapshot.imm_memtables.len());
-        iters.push(Box::new(snapshot.memtable.scan(lower, upper)));
-        iters.extend(
-            snapshot
-                .imm_memtables
-                .iter()
-                .map(|memtable| Box::new(memtable.scan(lower, upper))),
-        );
+        // collect MemTableIterators from current memtable + the list of immutable memtables
+        let table_iters = iter::once(&snapshot.memtable)
+            .chain(snapshot.imm_memtables.iter())
+            .map(|table| Box::new(table.scan(lower, upper)))
+            .collect();
 
-        Ok(FusedIterator::new(LsmIterator::new(
-            MergeIterator::create(iters),
-        )?))
+        LsmIterator::new(MergeIterator::create(table_iters)).map(FusedIterator::new)
     }
 }
