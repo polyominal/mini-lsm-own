@@ -19,6 +19,7 @@ mod builder;
 mod iterator;
 
 pub use builder::BlockBuilder;
+use bytes::BufMut;
 use bytes::Bytes;
 pub use iterator::BlockIterator;
 
@@ -34,7 +35,20 @@ impl Block {
     /// Encode the internal data to the data layout illustrated in the course
     /// Note: You may want to recheck if any of the expected field is missing from your output
     pub fn encode(&self) -> Bytes {
-        unimplemented!()
+        let num_elements = self.offsets.len();
+
+        let size_total = self.data.len() + num_elements * LEN_U16 + LEN_U16;
+        let mut combined = Vec::with_capacity(size_total);
+
+        combined.extend(self.data.iter());
+        for offset in &self.offsets {
+            combined.put_u16(*offset);
+        }
+        combined.put_u16(num_elements as u16);
+
+        debug_assert!(combined.len() == size_total);
+
+        Bytes::from(combined)
     }
 
     /// Decode from the data layout, transform the input `data` to a single `Block`
