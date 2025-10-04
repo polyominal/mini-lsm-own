@@ -112,9 +112,9 @@ impl BlockIterator {
             debug_assert!(idx < num_elements);
 
             let (key_start, key_end) = self.parse_key(idx);
-            let key_idx = KeySlice::from_slice(&self.block.data[key_start..key_end]);
+            let key_at_idx = KeySlice::from_slice(&self.block.data[key_start..key_end]);
 
-            if key_idx.cmp(&key) == Ordering::Less {
+            if key_at_idx.cmp(&key) == Ordering::Less {
                 lo = idx + 1;
             } else {
                 hi = idx;
