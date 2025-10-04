@@ -35,6 +35,8 @@ use crate::lsm_storage::BlockCache;
 
 use self::bloom::Bloom;
 
+const LEN_U32: usize = std::mem::size_of::<u32>();
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlockMeta {
     /// Offset of this data block.
@@ -52,13 +54,11 @@ impl BlockMeta {
     pub fn encode_block_meta(block_meta: &[BlockMeta], buf: &mut Vec<u8>) {
         for meta in block_meta {
             // offset, first key len, first key, last key len, last key
-            for meta in block_meta {
-                buf.put_u32(meta.offset as u32);
-                buf.put_u16(meta.first_key.len() as u16);
-                buf.put_slice(meta.first_key.raw_ref());
-                buf.put_u16(meta.last_key.len() as u16);
-                buf.put_slice(meta.last_key.raw_ref());
-            }
+            buf.put_u32(meta.offset as u32);
+            buf.put_u16(meta.first_key.len() as u16);
+            buf.put_slice(meta.first_key.raw_ref());
+            buf.put_u16(meta.last_key.len() as u16);
+            buf.put_slice(meta.last_key.raw_ref());
         }
     }
 
@@ -143,7 +143,35 @@ impl SsTable {
 
     /// Open SSTable from a file.
     pub fn open(id: usize, block_cache: Option<Arc<BlockCache>>, file: FileObject) -> Result<Self> {
-        unimplemented!()
+        let file_size = file.size();
+        let block_meta_offset = (file
+            .read(file_size - LEN_U32 as u64, LEN_U32 as u64)?
+            .as_slice())
+        .get_u32() as u64;
+
+        // assume at least one block
+        assert!(block_meta_offset < file_size - LEN_U32 as u64);
+        let block_meta = BlockMeta::decode_block_meta(
+            file.read(
+                block_meta_offset,
+                file_size - LEN_U32 as u64 - block_meta_offset,
+            )?
+            .as_slice(),
+        );
+
+        let first_key = block_meta.first().unwrap().first_key.clone();
+        let last_key = block_meta.last().unwrap().last_key.clone();
+        Ok(Self {
+            file,
+            block_meta,
+            block_meta_offset: block_meta_offset as usize,
+            id,
+            block_cache,
+            first_key,
+            last_key,
+            bloom: None,
+            max_ts: 0,
+        })
     }
 
     /// Create a mock SST with only first key + last key metadata

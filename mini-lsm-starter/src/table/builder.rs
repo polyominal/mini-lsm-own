@@ -20,6 +20,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Result;
+use bytes::BufMut;
 use bytes::Bytes;
 
 use super::FileObject;
@@ -106,8 +107,6 @@ impl SsTableBuilder {
         block_cache: Option<Arc<BlockCache>>,
         path: impl AsRef<Path>,
     ) -> Result<SsTable> {
-        assert!(block_cache.is_none());
-
         // force finalizing a block
         self.finalize_block();
 
@@ -119,6 +118,7 @@ impl SsTableBuilder {
         let block_meta_offset = self.data.len();
         let mut buf_sst = self.data;
         BlockMeta::encode_block_meta(&self.meta, &mut buf_sst);
+        buf_sst.put_u32(block_meta_offset as u32);
 
         let first_key = self.meta.first().unwrap().first_key.clone();
         let last_key = self.meta.last().unwrap().last_key.clone();
