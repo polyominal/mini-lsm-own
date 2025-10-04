@@ -100,29 +100,32 @@ impl BlockIterator {
     /// Note: You should assume the key-value pairs in the block are sorted when being added by
     /// callers.
     pub fn seek_to_key(&mut self, key: KeySlice) {
+        let num_elements = self.block.offsets.len();
+
         // we're essentially searching for the smallest index
         // whose key is not less than the input key
 
-        let num_elements = self.block.offsets.len();
-
-        let mut lo = 0;
-        let mut hi = num_elements;
-        while lo < hi {
-            let idx = (lo + hi - 1) / 2;
+        // invariant: min..=max being the set of candidates
+        let mut min = 0;
+        let mut max = num_elements;
+        while min < max {
+            let idx = (min + max - 1) / 2;
             debug_assert!(idx < num_elements);
 
             let (key_start, key_end) = self.parse_key(idx);
             let key_at_idx = KeySlice::from_slice(&self.block.data[key_start..key_end]);
 
             if key_at_idx.cmp(&key) == Ordering::Less {
-                lo = idx + 1;
+                // answer must be greater than min
+                min = idx + 1;
             } else {
-                hi = idx;
+                // answer must be no greater than max
+                max = idx;
             }
         }
 
-        debug_assert!(lo == hi);
-        self.seek(hi);
+        debug_assert!(min == max);
+        self.seek(max);
     }
 
     fn seek(&mut self, idx: usize) {
