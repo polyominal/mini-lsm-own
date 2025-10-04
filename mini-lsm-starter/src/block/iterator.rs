@@ -100,45 +100,40 @@ impl BlockIterator {
     /// Note: You should assume the key-value pairs in the block are sorted when being added by
     /// callers.
     pub fn seek_to_key(&mut self, key: KeySlice) {
+        let num_elements = self.block.offsets.len();
+
         // we're essentially searching for the smallest index
         // whose key is not less than the input key
 
-        let num_elements = self.block.offsets.len();
-        if num_elements == 0 {
-            // do nothing and return silently?
-            return;
-        }
+        // invariant: min..=max being the set of candidates
+        let mut min = 0;
+        let mut max = num_elements;
+        while min < max {
+            let idx = (min + max - 1) / 2;
+            debug_assert!(idx < num_elements);
 
-        let mut lo = 0;
-        let mut hi = num_elements;
-        while lo < hi {
-            let idx = (lo + hi - 1) / 2;
-            assert!(idx < num_elements);
+            let (key_start, key_end) = self.parse_key(idx);
+            let key_at_idx = KeySlice::from_slice(&self.block.data[key_start..key_end]);
 
-            let entry_start = self.block.offsets[idx] as usize;
-
-            let key_start = entry_start + LEN_U16;
-            let key_len = (&self.block.data[entry_start..key_start]).get_u16() as usize;
-            let key_end = key_start + key_len;
-            let key_idx = KeySlice::from_slice(&self.block.data[key_start..key_end]);
-
-            if key_idx.cmp(&key) == Ordering::Less {
-                lo = idx + 1;
+            if key_at_idx.cmp(&key) == Ordering::Less {
+                // answer must be greater than min
+                min = idx + 1;
             } else {
-                hi = idx;
+                // answer must be no greater than max
+                max = idx;
             }
         }
 
-        debug_assert!(lo == hi);
-        self.seek(hi);
+        debug_assert!(min == max);
+        self.seek(max);
     }
 
     fn seek(&mut self, idx: usize) {
         let num_elements = self.block.offsets.len();
         if num_elements <= idx {
             // clean up the key and return silently
-            self.key = KeyVec::new();
-            // make sure that we're invalidated
+            self.key.clear();
+            // make sure that we're really invalidated
             debug_assert!(!self.is_valid());
             return;
         }
@@ -146,19 +141,27 @@ impl BlockIterator {
         // set idx
         self.idx = idx;
 
-        let entry_start = self.block.offsets[idx] as usize;
+        // parse key range
+        let (key_start, key_end) = self.parse_key(idx);
 
         // set key
-        let key_start = entry_start + LEN_U16;
-        let key_len = (&self.block.data[entry_start..key_start]).get_u16() as usize;
-        let key_end = key_start + key_len;
-        let key = KeySlice::from_slice(&self.block.data[key_start..key_end]);
-        self.key.set_from_slice(key);
+        self.key
+            .set_from_slice(KeySlice::from_slice(&self.block.data[key_start..key_end]));
 
         // set value range
         let value_start = key_end + LEN_U16;
         let value_len = (&self.block.data[key_end..value_start]).get_u16() as usize;
-        let value_end = value_start + value_len;
-        self.value_range = (value_start, value_end);
+        self.value_range = (value_start, value_start + value_len);
+    }
+
+    fn parse_key_inner(&self, offset: usize) -> (usize, usize) {
+        let key_start = offset + LEN_U16;
+        let key_len = (&self.block.data[offset..key_start]).get_u16() as usize;
+        (key_start, key_start + key_len)
+    }
+
+    /// Parses the key (range) given index.
+    fn parse_key(&self, idx: usize) -> (usize, usize) {
+        self.parse_key_inner(self.block.offsets[idx] as usize)
     }
 }
