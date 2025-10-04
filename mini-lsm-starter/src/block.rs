@@ -19,6 +19,7 @@ mod builder;
 mod iterator;
 
 pub use builder::BlockBuilder;
+use bytes::Buf;
 use bytes::BufMut;
 use bytes::Bytes;
 pub use iterator::BlockIterator;
@@ -53,6 +54,20 @@ impl Block {
 
     /// Decode from the data layout, transform the input `data` to a single `Block`
     pub fn decode(data: &[u8]) -> Self {
-        unimplemented!()
+        // contains at least (# of elements)
+        debug_assert!(LEN_U16 <= data.len());
+
+        let offsets_end = data.len() - LEN_U16;
+        let num_elements = (&data[offsets_end..]).get_u16() as usize;
+
+        debug_assert!(num_elements * LEN_U16 <= offsets_end);
+        let offsets_start = offsets_end - num_elements * LEN_U16;
+
+        let mut buf_offsets = &data[offsets_start..];
+
+        Self {
+            data: data[0..offsets_start].to_vec(),
+            offsets: (0..num_elements).map(|_| buf_offsets.get_u16()).collect(),
+        }
     }
 }
