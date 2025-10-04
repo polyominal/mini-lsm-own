@@ -309,8 +309,8 @@ impl LsmStorageInner {
         }
 
         // check immutable memtables
-        for memtable in &snapshot.imm_memtables {
-            if let Some(value) = memtable.get(key) {
+        for table in &snapshot.imm_memtables {
+            if let Some(value) = table.get(key) {
                 return Ok(if !value.is_empty() { Some(value) } else { None });
             }
         }
@@ -369,11 +369,7 @@ impl LsmStorageInner {
         // so it might be full. acquire the state lock and force freeze
         let state_lock = self.state_lock.lock();
 
-        let guard = self.state.read();
-        let do_freeze = self.should_freeze(guard.memtable.approximate_size());
-        drop(guard);
-
-        if do_freeze {
+        if self.should_freeze(self.state.read().memtable.approximate_size()) {
             self.force_freeze_memtable(&state_lock)
         } else {
             Ok(())
@@ -417,11 +413,11 @@ impl LsmStorageInner {
         let snapshot = Arc::clone(&self.state.read());
 
         // collect MemTableIterators from current memtable + the list of immutable memtables
-        let iters = iter::once(&snapshot.memtable)
+        let table_iters = iter::once(&snapshot.memtable)
             .chain(snapshot.imm_memtables.iter())
-            .map(|memtable| Box::new(memtable.scan(lower, upper)))
+            .map(|table| Box::new(table.scan(lower, upper)))
             .collect();
 
-        LsmIterator::new(MergeIterator::create(iters)).map(FusedIterator::new)
+        LsmIterator::new(MergeIterator::create(table_iters)).map(FusedIterator::new)
     }
 }
