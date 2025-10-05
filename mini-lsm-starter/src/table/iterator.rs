@@ -20,11 +20,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use bytes::Buf;
-
-use super::LEN_U32;
 use super::SsTable;
-use crate::block::Block;
 use crate::{block::BlockIterator, iterators::StorageIterator, key::KeySlice};
 
 /// An iterator over the contents of an SSTable.
@@ -36,11 +32,12 @@ pub struct SsTableIterator {
 
 impl SsTableIterator {
     fn new(table: Arc<SsTable>) -> Result<Self> {
-        let blk_iter = Self::get_block_iter(Arc::clone(&table), 0)?;
+        let blk_idx = 0;
+        let blk_iter = BlockIterator::create_and_seek_to_first(table.read_block(blk_idx)?);
         Ok(Self {
             table,
             blk_iter,
-            blk_idx: 0,
+            blk_idx,
         })
     }
 
@@ -100,31 +97,10 @@ impl SsTableIterator {
         debug_assert!(blk_idx <= self.table.block_meta.len());
         self.blk_idx = blk_idx;
         if self.blk_idx != self.table.block_meta.len() {
-            self.blk_iter = Self::get_block_iter(Arc::clone(&self.table), blk_idx)?;
+            self.blk_iter =
+                BlockIterator::create_and_seek_to_first(self.table.read_block(blk_idx)?);
         }
         Ok(())
-    }
-
-    fn get_block_iter(table: Arc<SsTable>, blk_idx: usize) -> Result<BlockIterator> {
-        let num_blocks = table.block_meta.len();
-        debug_assert!(blk_idx < num_blocks, "blk_idx overbound");
-
-        let blk_start = table.block_meta[blk_idx].offset;
-        let blk_end = if blk_idx + 1 != num_blocks {
-            table.block_meta[blk_idx + 1].offset
-        } else {
-            let file_size = table.file.size();
-            let meta_offset_end = file_size - LEN_U32 as u64;
-            let meta_offset = table.file.read(meta_offset_end, LEN_U32 as u64)?;
-            meta_offset.as_slice().get_u32() as usize
-        };
-        debug_assert!(blk_start < blk_end);
-
-        let blk = table
-            .file
-            .read(blk_start as u64, (blk_end - blk_start) as u64)?;
-        let blk = Block::decode(blk.as_slice());
-        Ok(BlockIterator::create_and_seek_to_first(Arc::new(blk)))
     }
 }
 

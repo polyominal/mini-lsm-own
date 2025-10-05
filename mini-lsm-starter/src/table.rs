@@ -192,7 +192,23 @@ impl SsTable {
 
     /// Read a block from the disk.
     pub fn read_block(&self, block_idx: usize) -> Result<Arc<Block>> {
-        unimplemented!()
+        let meta = &self.block_meta;
+        let num_blocks = meta.len();
+        debug_assert!(block_idx < num_blocks, "blk_idx overbound");
+
+        let start = meta[block_idx].offset;
+        let end = if block_idx + 1 != num_blocks {
+            meta[block_idx + 1].offset
+        } else {
+            let file_size = self.file.size();
+            let meta_offset_end = file_size - LEN_U32 as u64;
+            let meta_offset = self.file.read(meta_offset_end, LEN_U32 as u64)?;
+            meta_offset.as_slice().get_u32() as usize
+        };
+        debug_assert!(start < end);
+
+        let block = self.file.read(start as u64, (end - start) as u64)?;
+        Ok(Arc::new(Block::decode(block.as_slice())))
     }
 
     /// Read a block from disk, with block cache. (Day 4)
