@@ -30,19 +30,20 @@ pub struct SsTableIterator {
 }
 
 impl SsTableIterator {
-    fn new(table: Arc<SsTable>) -> Result<Self> {
-        let blk_idx = 0;
-        let blk_iter = BlockIterator::create_and_seek_to_first(table.read_block_cached(blk_idx)?);
-        Ok(Self {
+    fn new(table: Arc<SsTable>) -> Self {
+        Self {
             table,
-            blk_iter,
-            blk_idx,
-        })
+            blk_iter: BlockIterator::default(),
+            blk_idx: 0,
+        }
     }
 
-    /// Create a new iterator and seek to the first key-value pair in the first data block.
+    // Create a new iterator and seek to the first key-value pair in the first data block.
     pub fn create_and_seek_to_first(table: Arc<SsTable>) -> Result<Self> {
-        Self::new(table)
+        let mut iter = Self::new(table);
+        iter.seek_to_first()?;
+
+        Ok(iter)
     }
 
     /// Seek to the first key-value pair in the first data block.
@@ -52,10 +53,10 @@ impl SsTableIterator {
 
     /// Create a new iterator and seek to the first key-value pair which >= `key`.
     pub fn create_and_seek_to_key(table: Arc<SsTable>, key: KeySlice) -> Result<Self> {
-        let mut ss_iter = Self::new(table)?;
-        ss_iter.seek_to_key(key)?;
+        let mut iter = Self::new(table);
+        iter.seek_to_key(key)?;
 
-        Ok(ss_iter)
+        Ok(iter)
     }
 
     /// Seek to the first key-value pair which >= `key`.
@@ -83,8 +84,9 @@ impl SsTableIterator {
     fn seek_to(&mut self, blk_idx: usize) -> Result<()> {
         let num_blocks = self.table.num_of_blocks();
         debug_assert!(blk_idx <= num_blocks);
+
         self.blk_idx = blk_idx;
-        if self.blk_idx != num_blocks {
+        if blk_idx != num_blocks {
             self.blk_iter =
                 BlockIterator::create_and_seek_to_first(self.table.read_block_cached(blk_idx)?);
         }
