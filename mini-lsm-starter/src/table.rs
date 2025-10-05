@@ -20,6 +20,7 @@ mod builder;
 mod iterator;
 
 use std::fs::File;
+use std::mem;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -36,8 +37,6 @@ use crate::lsm_storage::BlockCache;
 
 use self::bloom::Bloom;
 
-const LEN_U32: usize = std::mem::size_of::<u32>();
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlockMeta {
     /// Offset of this data block.
@@ -53,6 +52,20 @@ impl BlockMeta {
     /// You may add extra fields to the buffer,
     /// in order to help keep track of `first_key` when decoding from the same buffer in the future.
     pub fn encode_block_meta(block_meta: &[BlockMeta], buf: &mut Vec<u8>) {
+        // reserve space for metadata
+        let len_delta = block_meta
+            .iter()
+            .map(|meta| {
+                mem::size_of::<u32>()
+                    + mem::size_of::<u16>()
+                    + meta.first_key.len()
+                    + mem::size_of::<u16>()
+                    + meta.last_key.len()
+            })
+            .sum();
+
+        let len_before = buf.len();
+        buf.reserve(len_delta);
         for meta in block_meta {
             // offset, first key len, first key, last key len, last key
             buf.put_u32(meta.offset as u32);
@@ -61,6 +74,7 @@ impl BlockMeta {
             buf.put_u16(meta.last_key.len() as u16);
             buf.put_slice(meta.last_key.raw_ref());
         }
+        debug_assert!(len_before + len_delta == buf.len());
     }
 
     /// Decode block meta from a buffer.
@@ -145,8 +159,8 @@ impl SsTable {
     /// Open SSTable from a file.
     pub fn open(id: usize, block_cache: Option<Arc<BlockCache>>, file: FileObject) -> Result<Self> {
         let file_size = file.size();
-        let meta_offset_end = file_size - LEN_U32 as u64;
-        let meta_offset = file.read(meta_offset_end, LEN_U32 as u64)?;
+        let meta_offset_end = file_size - mem::size_of::<u32>() as u64;
+        let meta_offset = file.read(meta_offset_end, mem::size_of::<u32>() as u64)?;
         let meta_offset = meta_offset.as_slice().get_u32() as u64;
 
         // assume at least one block
@@ -225,8 +239,15 @@ impl SsTable {
     /// Note: You may want to make use of the `first_key` stored in `BlockMeta`.
     /// You may also assume the key-value pairs stored in each consecutive block are sorted.
     pub fn find_block_idx(&self, key: KeySlice) -> usize {
-        self.block_meta
-            .partition_point(|meta| meta.last_key.as_key_slice() < key)
+        let idx = self
+            .block_meta
+            .partition_point(|meta| meta.last_key.as_key_slice() < key);
+
+        debug_assert!(
+            idx == self.block_meta.len() || key <= self.block_meta[idx].last_key.as_key_slice()
+        );
+
+        idx
     }
 
     /// Get number of data blocks.
