@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
-
 pub(crate) mod bloom;
 mod builder;
 mod iterator;
 
+use std::cmp::Ordering;
 use std::fs::File;
 use std::path::Path;
 use std::sync::Arc;
@@ -131,6 +129,7 @@ pub struct SsTable {
     block_cache: Option<Arc<BlockCache>>,
     first_key: KeyBytes,
     last_key: KeyBytes,
+    #[allow(dead_code)]
     pub(crate) bloom: Option<Bloom>,
     /// The maximum timestamp stored in this SST, implemented in week 3.
     max_ts: u64,
@@ -225,7 +224,22 @@ impl SsTable {
     /// Note: You may want to make use of the `first_key` stored in `BlockMeta`.
     /// You may also assume the key-value pairs stored in each consecutive block are sorted.
     pub fn find_block_idx(&self, key: KeySlice) -> usize {
-        unimplemented!();
+        let meta = &self.block_meta;
+        let num_blocks = meta.len();
+
+        let mut min = 0;
+        let mut max = num_blocks;
+        while min < max {
+            let idx = (min + max - 1) / 2;
+            debug_assert!(idx < num_blocks);
+            if meta[idx].last_key.as_key_slice().cmp(&key) == Ordering::Less {
+                min = idx + 1;
+            } else {
+                max = idx;
+            }
+        }
+
+        max
     }
 
     /// Get number of data blocks.

@@ -63,24 +63,12 @@ impl SsTableIterator {
     /// Note: You probably want to review the handout for detailed explanation when implementing
     /// this function.
     pub fn seek_to_key(&mut self, key: KeySlice) -> Result<()> {
-        let meta = &self.table.block_meta;
-        let num_blocks = meta.len();
+        let target_blk_idx = self.table.find_block_idx(key);
+        let num_blocks = self.table.block_meta.len();
 
-        let mut min = 0;
-        let mut max = num_blocks;
-        while min < max {
-            let idx = (min + max - 1) / 2;
-            debug_assert!(idx < num_blocks);
-            if meta[idx].last_key.as_key_slice().cmp(&key) == Ordering::Less {
-                min = idx + 1;
-            } else {
-                max = idx;
-            }
-        }
-
-        let target_blk_idx = max;
         self.seek_to(target_blk_idx)?;
         debug_assert!(target_blk_idx == self.blk_idx);
+
         if target_blk_idx != num_blocks {
             debug_assert!(self.blk_iter.is_valid());
             self.blk_iter.seek_to_key(key);
