@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
-
 use std::cmp::Ordering;
 use std::sync::Arc;
 
@@ -36,6 +33,7 @@ pub struct BlockIterator {
     /// Current index of the key-value pair, should be in range of [0, num_of_elements)
     idx: usize,
     /// The first key in the block
+    #[allow(dead_code)]
     first_key: KeyVec,
 }
 
