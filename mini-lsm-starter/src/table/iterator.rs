@@ -21,12 +21,10 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use bytes::Buf;
-use bytes::Bytes;
 
 use super::LEN_U32;
 use super::SsTable;
 use crate::block::Block;
-use crate::key::KeyBytes;
 use crate::{block::BlockIterator, iterators::StorageIterator, key::KeySlice};
 
 /// An iterator over the contents of an SSTable.
