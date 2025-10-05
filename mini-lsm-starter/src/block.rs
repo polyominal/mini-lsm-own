@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::mem;
+
 mod builder;
 mod iterator;
 
@@ -22,8 +24,6 @@ use bytes::Bytes;
 pub use iterator::BlockIterator;
 
 use crate::key::KeySlice;
-
-const LEN_U16: usize = std::mem::size_of::<u16>();
 
 /// A block is the smallest unit of read and caching in LSM tree. It is a collection of sorted key-value pairs.
 #[derive(Default)]
@@ -38,7 +38,8 @@ impl Block {
     pub fn encode(&self) -> Bytes {
         let num_elements = self.offsets.len();
 
-        let size_total = self.data.len() + num_elements * LEN_U16 + LEN_U16;
+        let size_total =
+            self.data.len() + num_elements * mem::size_of::<u16>() + mem::size_of::<u16>();
         let mut combined = Vec::with_capacity(size_total);
 
         combined.extend(self.data.iter());
@@ -55,13 +56,13 @@ impl Block {
     /// Decode from the data layout, transform the input `data` to a single `Block`
     pub fn decode(data: &[u8]) -> Self {
         // contains at least (# of elements)
-        debug_assert!(LEN_U16 <= data.len());
+        debug_assert!(mem::size_of::<u16>() <= data.len());
 
-        let offsets_end = data.len() - LEN_U16;
+        let offsets_end = data.len() - mem::size_of::<u16>();
         let num_elements = (&data[offsets_end..]).get_u16() as usize;
 
-        debug_assert!(num_elements * LEN_U16 <= offsets_end);
-        let offsets_start = offsets_end - num_elements * LEN_U16;
+        debug_assert!(num_elements * mem::size_of::<u16>() <= offsets_end);
+        let offsets_start = offsets_end - num_elements * mem::size_of::<u16>();
 
         let mut buf_offsets = &data[offsets_start..];
 
@@ -111,9 +112,9 @@ impl Block {
 
     /// Parses the entry (either key or value) range starting at the given offset.
     fn parse_entry_at(&self, offset: usize) -> (usize, usize) {
-        let key_len = self.data_slice(offset, LEN_U16).get_u16() as usize;
+        let key_len = self.data_slice(offset, mem::size_of::<u16>()).get_u16() as usize;
 
-        (offset + LEN_U16, key_len)
+        (offset + mem::size_of::<u16>(), key_len)
     }
 
     pub fn data_slice(&self, offset: usize, len: usize) -> &[u8] {

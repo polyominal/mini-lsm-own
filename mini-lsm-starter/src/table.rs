@@ -20,6 +20,7 @@ mod builder;
 mod iterator;
 
 use std::fs::File;
+use std::mem;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -35,8 +36,6 @@ use crate::key::{KeyBytes, KeySlice};
 use crate::lsm_storage::BlockCache;
 
 use self::bloom::Bloom;
-
-const LEN_U32: usize = std::mem::size_of::<u32>();
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlockMeta {
@@ -145,8 +144,8 @@ impl SsTable {
     /// Open SSTable from a file.
     pub fn open(id: usize, block_cache: Option<Arc<BlockCache>>, file: FileObject) -> Result<Self> {
         let file_size = file.size();
-        let meta_offset_end = file_size - LEN_U32 as u64;
-        let meta_offset = file.read(meta_offset_end, LEN_U32 as u64)?;
+        let meta_offset_end = file_size - mem::size_of::<u32>() as u64;
+        let meta_offset = file.read(meta_offset_end, mem::size_of::<u32>() as u64)?;
         let meta_offset = meta_offset.as_slice().get_u32() as u64;
 
         // assume at least one block
