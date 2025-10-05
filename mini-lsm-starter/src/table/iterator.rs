@@ -110,6 +110,7 @@ impl StorageIterator for SsTableIterator {
     /// Return whether the current block iterator is valid or not.
     fn is_valid(&self) -> bool {
         debug_assert!(self.blk_idx <= self.table.num_of_blocks());
+        debug_assert!((self.blk_idx != self.table.num_of_blocks()) == self.blk_iter.is_valid());
         self.blk_idx != self.table.num_of_blocks()
     }
 
