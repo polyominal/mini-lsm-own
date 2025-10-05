@@ -52,6 +52,20 @@ impl BlockMeta {
     /// You may add extra fields to the buffer,
     /// in order to help keep track of `first_key` when decoding from the same buffer in the future.
     pub fn encode_block_meta(block_meta: &[BlockMeta], buf: &mut Vec<u8>) {
+        // reserve space for metadata
+        let len_delta = block_meta
+            .iter()
+            .map(|meta| {
+                mem::size_of::<u32>()
+                    + mem::size_of::<u16>()
+                    + meta.first_key.len()
+                    + mem::size_of::<u16>()
+                    + meta.last_key.len()
+            })
+            .sum();
+
+        let len_before = block_meta.len();
+        buf.reserve(len_delta);
         for meta in block_meta {
             // offset, first key len, first key, last key len, last key
             buf.put_u32(meta.offset as u32);
@@ -60,6 +74,7 @@ impl BlockMeta {
             buf.put_u16(meta.last_key.len() as u16);
             buf.put_slice(meta.last_key.raw_ref());
         }
+        debug_assert!(len_before + len_delta == buf.len());
     }
 
     /// Decode block meta from a buffer.
