@@ -120,8 +120,10 @@ impl SsTableBuilder {
         BlockMeta::encode_block_meta(&self.meta, &mut buf_sst);
         buf_sst.put_u32(block_meta_offset as u32);
 
-        let first_key = self.meta.first().unwrap().first_key.clone();
-        let last_key = self.meta.last().unwrap().last_key.clone();
+        debug_assert!(!self.meta.is_empty());
+        let first_key = self.meta[0].first_key.clone();
+        let last_key = self.meta[self.meta.len() - 1].last_key.clone();
+
         Ok(SsTable {
             file: FileObject::create(path.as_ref(), buf_sst)?,
             block_meta: self.meta,

@@ -153,8 +153,10 @@ impl SsTable {
         let meta = file.read(meta_offset, meta_offset_end - meta_offset)?;
         let meta = BlockMeta::decode_block_meta(meta.as_slice());
 
-        let first_key = meta.first().unwrap().first_key.clone();
-        let last_key = meta.last().unwrap().last_key.clone();
+        debug_assert!(!meta.is_empty());
+        let first_key = meta[0].first_key.clone();
+        let last_key = meta[meta.len() - 1].last_key.clone();
+
         Ok(Self {
             file,
             block_meta: meta,
