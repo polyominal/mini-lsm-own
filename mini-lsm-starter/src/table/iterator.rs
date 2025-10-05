@@ -38,7 +38,7 @@ impl SsTableIterator {
         }
     }
 
-    // Create a new iterator and seek to the first key-value pair in the first data block.
+    /// Create a new iterator and seek to the first key-value pair in the first data block.
     pub fn create_and_seek_to_first(table: Arc<SsTable>) -> Result<Self> {
         let mut iter = Self::new(table);
         iter.seek_to_first()?;
@@ -48,7 +48,7 @@ impl SsTableIterator {
 
     /// Seek to the first key-value pair in the first data block.
     pub fn seek_to_first(&mut self) -> Result<()> {
-        self.seek_to(0)
+        self.seek(0)
     }
 
     /// Create a new iterator and seek to the first key-value pair which >= `key`.
@@ -63,33 +63,30 @@ impl SsTableIterator {
     /// Note: You probably want to review the handout for detailed explanation when implementing
     /// this function.
     pub fn seek_to_key(&mut self, key: KeySlice) -> Result<()> {
-        let target_blk_idx = self.table.find_block_idx(key);
+        let blk_idx = self.table.find_block_idx(key);
         let num_blocks = self.table.num_of_blocks();
 
-        self.seek_to(target_blk_idx)?;
-        debug_assert!(target_blk_idx == self.blk_idx);
+        self.seek(blk_idx)?;
+        debug_assert!(blk_idx == self.blk_idx);
 
-        if target_blk_idx != num_blocks {
+        if blk_idx != num_blocks {
             debug_assert!(self.blk_iter.is_valid());
             self.blk_iter.seek_to_key(key);
-            debug_assert!(self.blk_iter.is_valid());
-            debug_assert!(key <= self.key());
-        } else {
-            debug_assert!(target_blk_idx == num_blocks);
         }
 
         Ok(())
     }
 
-    fn seek_to(&mut self, blk_idx: usize) -> Result<()> {
+    fn seek(&mut self, blk_idx: usize) -> Result<()> {
         let num_blocks = self.table.num_of_blocks();
         debug_assert!(blk_idx <= num_blocks);
 
         self.blk_idx = blk_idx;
-        if blk_idx != num_blocks {
-            self.blk_iter =
-                BlockIterator::create_and_seek_to_first(self.table.read_block_cached(blk_idx)?);
-        }
+        self.blk_iter = if blk_idx != num_blocks {
+            BlockIterator::create_and_seek_to_first(self.table.read_block_cached(blk_idx)?)
+        } else {
+            BlockIterator::default()
+        };
         Ok(())
     }
 }
@@ -126,7 +123,7 @@ impl StorageIterator for SsTableIterator {
         self.blk_iter.next();
 
         if !self.blk_iter.is_valid() {
-            self.seek_to(self.blk_idx + 1)?;
+            self.seek(self.blk_idx + 1)?;
         }
 
         Ok(())
