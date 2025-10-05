@@ -24,6 +24,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Result;
+use anyhow::anyhow;
 pub use builder::SsTableBuilder;
 use bytes::Buf;
 use bytes::BufMut;
@@ -204,20 +205,27 @@ impl SsTable {
         };
         debug_assert!(start < end);
 
-        let block = self.file.read(start as u64, (end - start) as u64)?;
-        Ok(Arc::new(Block::decode(block.as_slice())))
+        let b = self.file.read(start as u64, (end - start) as u64)?;
+        Ok(Arc::new(Block::decode(b.as_slice())))
     }
 
     /// Read a block from disk, with block cache. (Day 4)
     pub fn read_block_cached(&self, block_idx: usize) -> Result<Arc<Block>> {
-        unimplemented!()
+        if let Some(ref block_cache) = self.block_cache {
+            let b = block_cache
+                .try_get_with((self.id, block_idx), || self.read_block(block_idx))
+                .map_err(|e| anyhow!("{e}"))?;
+            Ok(b)
+        } else {
+            self.read_block(block_idx)
+        }
     }
 
     /// Find the block that may contain `key`.
     /// Note: You may want to make use of the `first_key` stored in `BlockMeta`.
     /// You may also assume the key-value pairs stored in each consecutive block are sorted.
     pub fn find_block_idx(&self, key: KeySlice) -> usize {
-        unimplemented!()
+        unimplemented!();
     }
 
     /// Get number of data blocks.

@@ -33,7 +33,7 @@ pub struct SsTableIterator {
 impl SsTableIterator {
     fn new(table: Arc<SsTable>) -> Result<Self> {
         let blk_idx = 0;
-        let blk_iter = BlockIterator::create_and_seek_to_first(table.read_block(blk_idx)?);
+        let blk_iter = BlockIterator::create_and_seek_to_first(table.read_block_cached(blk_idx)?);
         Ok(Self {
             table,
             blk_iter,
@@ -98,7 +98,7 @@ impl SsTableIterator {
         self.blk_idx = blk_idx;
         if self.blk_idx != self.table.block_meta.len() {
             self.blk_iter =
-                BlockIterator::create_and_seek_to_first(self.table.read_block(blk_idx)?);
+                BlockIterator::create_and_seek_to_first(self.table.read_block_cached(blk_idx)?);
         }
         Ok(())
     }
