@@ -80,16 +80,16 @@ impl SsTableBuilder {
     fn finalize_block(&mut self) {
         let finalized_builder = mem::replace(&mut self.builder, BlockBuilder::new(self.block_size));
 
-        // append data
-        let encoded = finalized_builder.build().encode();
-        self.data.extend(encoded);
-
         // append metadata
         self.meta.push(BlockMeta {
             offset: self.data.len(),
             first_key: KeyBytes::from_bytes(Bytes::from(mem::take(&mut self.first_key))),
             last_key: KeyBytes::from_bytes(Bytes::from(mem::take(&mut self.last_key))),
         });
+
+        // append data
+        let encoded = finalized_builder.build().encode();
+        self.data.extend(encoded);
     }
 
     /// Get the estimated size of the SSTable.
