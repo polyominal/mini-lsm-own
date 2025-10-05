@@ -122,7 +122,9 @@ You can implement helper functions like `range_overlap` and `key_within` to simp
 ## Test Your Understanding
 
 * What happens if a user requests to delete a key twice?
+  * there will be two "set some key to nil" updates and things work
 * How much memory (or number of blocks) will be loaded into memory at the same time when the iterator is initialized?
+  * sum of the sizes of memtable + SSTs + meta + cache
 * Some crazy users want to *fork* their LSM tree. They want to start the engine to ingest some data, and then fork it, so that they get two identical dataset and then operate on them separately. An easy but not efficient way to implement is to simply copy all SSTs and the in-memory structures to a new directory and start the engine. However, note that we never modify the on-disk files, and we can actually reuse the SST files from the parent engine. How do you think you can implement this fork functionality efficiently without copying data? (Check out [Neon Branching](https://neon.tech/docs/introduction/branching)).
 * Imagine you are building a multi-tenant LSM system where you host 10k databases on a single 128GB memory machine. The memtable size limit is set to 256MB. How much memory for memtable do you need for this setup?
   * Obviously, you don't have enough memory for all these memtables. Assume each user still has their own memtable, how can you design the memtable flush policy to make it work? Does it make sense to make all these users share the same memtable (i.e., by encoding a tenant ID as the key prefix)?
