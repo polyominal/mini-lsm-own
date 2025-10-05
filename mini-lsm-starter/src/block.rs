@@ -70,13 +70,13 @@ impl Block {
         }
     }
 
-    pub fn num_blocks(&self) -> usize {
+    pub fn num_of_blocks(&self) -> usize {
         self.offsets.len()
     }
 
     /// Seek to the first key that >= `key`.
     pub fn find_key_idx(&self, key: KeySlice) -> usize {
-        let num_elements = self.num_blocks();
+        let num_elements = self.num_of_blocks();
 
         // we're essentially searching for the smallest index
         // whose key is not less than the input key

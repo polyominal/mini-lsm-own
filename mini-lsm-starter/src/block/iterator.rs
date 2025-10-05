@@ -99,7 +99,7 @@ impl BlockIterator {
     }
 
     fn seek(&mut self, idx: usize) {
-        if self.block.num_blocks() <= idx {
+        if self.block.num_of_blocks() <= idx {
             // clean up the key and return silently
             self.key.clear();
             // make sure that we're really invalidated
