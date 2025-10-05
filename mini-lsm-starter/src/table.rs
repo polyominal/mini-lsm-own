@@ -200,10 +200,7 @@ impl SsTable {
         let end = if block_idx + 1 != num_blocks {
             meta[block_idx + 1].offset
         } else {
-            let file_size = self.file.size();
-            let meta_offset_end = file_size - LEN_U32 as u64;
-            let meta_offset = self.file.read(meta_offset_end, LEN_U32 as u64)?;
-            meta_offset.as_slice().get_u32() as usize
+            self.block_meta_offset
         };
         debug_assert!(start < end);
 
