@@ -64,7 +64,7 @@ impl BlockMeta {
             })
             .sum();
 
-        let len_before = block_meta.len();
+        let len_before = buf.len();
         buf.reserve(len_delta);
         for meta in block_meta {
             // offset, first key len, first key, last key len, last key
