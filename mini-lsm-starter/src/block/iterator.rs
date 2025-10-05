@@ -12,10 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
-
-use std::cmp::Ordering;
 use std::sync::Arc;
 
 use bytes::Buf;
@@ -36,6 +32,7 @@ pub struct BlockIterator {
     /// Current index of the key-value pair, should be in range of [0, num_of_elements)
     idx: usize,
     /// The first key in the block
+    #[allow(dead_code)]
     first_key: KeyVec,
 }
 
@@ -115,7 +112,7 @@ impl BlockIterator {
             let (key_start, key_end) = self.parse_key(idx);
             let key_at_idx = KeySlice::from_slice(&self.block.data[key_start..key_end]);
 
-            if key_at_idx.cmp(&key) == Ordering::Less {
+            if key_at_idx < key {
                 // answer must be greater than min
                 min = idx + 1;
             } else {
