@@ -64,12 +64,11 @@ impl SsTableIterator {
     /// this function.
     pub fn seek_to_key(&mut self, key: KeySlice) -> Result<()> {
         let blk_idx = self.table.find_block_idx(key);
-        let num_blocks = self.table.num_of_blocks();
 
         self.seek(blk_idx)?;
         debug_assert!(blk_idx == self.blk_idx);
 
-        if blk_idx != num_blocks {
+        if blk_idx != self.table.num_of_blocks() {
             debug_assert!(self.blk_iter.is_valid());
             self.blk_iter.seek_to_key(key);
         }
