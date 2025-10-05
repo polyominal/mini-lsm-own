@@ -242,6 +242,7 @@ impl SsTable {
         let idx = self
             .block_meta
             .partition_point(|meta| meta.last_key.as_key_slice() < key);
+
         debug_assert!(
             idx == self.block_meta.len() || key <= self.block_meta[idx].last_key.as_key_slice()
         );

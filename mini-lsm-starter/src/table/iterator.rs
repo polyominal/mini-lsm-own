@@ -71,6 +71,7 @@ impl SsTableIterator {
         if blk_idx != self.table.num_of_blocks() {
             debug_assert!(self.blk_iter.is_valid());
             self.blk_iter.seek_to_key(key);
+            debug_assert!(key <= self.key());
         }
 
         Ok(())
