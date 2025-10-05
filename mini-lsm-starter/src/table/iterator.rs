@@ -15,7 +15,6 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
-use std::cmp::Ordering;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -73,7 +72,7 @@ impl SsTableIterator {
             debug_assert!(self.blk_iter.is_valid());
             self.blk_iter.seek_to_key(key);
             debug_assert!(self.blk_iter.is_valid());
-            debug_assert_ne!(self.key().cmp(&key), Ordering::Less);
+            debug_assert!(key <= self.key());
         } else {
             debug_assert!(target_blk_idx == num_blocks);
         }

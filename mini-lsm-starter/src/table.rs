@@ -19,7 +19,6 @@ pub(crate) mod bloom;
 mod builder;
 mod iterator;
 
-use std::cmp::Ordering;
 use std::fs::File;
 use std::path::Path;
 use std::sync::Arc;
@@ -226,22 +225,8 @@ impl SsTable {
     /// Note: You may want to make use of the `first_key` stored in `BlockMeta`.
     /// You may also assume the key-value pairs stored in each consecutive block are sorted.
     pub fn find_block_idx(&self, key: KeySlice) -> usize {
-        let meta = &self.block_meta;
-        let num_blocks = meta.len();
-
-        let mut min = 0;
-        let mut max = num_blocks;
-        while min < max {
-            let idx = (min + max - 1) / 2;
-            debug_assert!(idx < num_blocks);
-            if meta[idx].last_key.as_key_slice().cmp(&key) == Ordering::Less {
-                min = idx + 1;
-            } else {
-                max = idx;
-            }
-        }
-
-        max
+        self.block_meta
+            .partition_point(|meta| meta.last_key.as_key_slice() < key)
     }
 
     /// Get number of data blocks.

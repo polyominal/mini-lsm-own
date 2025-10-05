@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
 use std::sync::Arc;
 
 use bytes::Buf;
@@ -113,7 +112,7 @@ impl BlockIterator {
             let (key_start, key_end) = self.parse_key(idx);
             let key_at_idx = KeySlice::from_slice(&self.block.data[key_start..key_end]);
 
-            if key_at_idx.cmp(&key) == Ordering::Less {
+            if key_at_idx < key {
                 // answer must be greater than min
                 min = idx + 1;
             } else {
