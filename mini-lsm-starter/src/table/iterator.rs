@@ -15,15 +15,18 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
+use std::cmp::Ordering;
 use std::sync::Arc;
 
 use anyhow::Result;
 
 use bytes::Buf;
+use bytes::Bytes;
 
 use super::LEN_U32;
 use super::SsTable;
 use crate::block::Block;
+use crate::key::KeyBytes;
 use crate::{block::BlockIterator, iterators::StorageIterator, key::KeySlice};
 
 /// An iterator over the contents of an SSTable.
@@ -55,14 +58,44 @@ impl SsTableIterator {
 
     /// Create a new iterator and seek to the first key-value pair which >= `key`.
     pub fn create_and_seek_to_key(table: Arc<SsTable>, key: KeySlice) -> Result<Self> {
-        unimplemented!()
+        let mut ss_iter = Self::new(table)?;
+        ss_iter.seek_to_key(key)?;
+
+        Ok(ss_iter)
     }
 
     /// Seek to the first key-value pair which >= `key`.
     /// Note: You probably want to review the handout for detailed explanation when implementing
     /// this function.
     pub fn seek_to_key(&mut self, key: KeySlice) -> Result<()> {
-        unimplemented!()
+        let meta = &self.table.block_meta;
+        let num_blocks = meta.len();
+
+        let mut min = 0;
+        let mut max = num_blocks;
+        while min < max {
+            let idx = (min + max - 1) / 2;
+            debug_assert!(idx < num_blocks);
+            if meta[idx].last_key.as_key_slice().cmp(&key) == Ordering::Less {
+                min = idx + 1;
+            } else {
+                max = idx;
+            }
+        }
+
+        let target_blk_idx = max;
+        self.seek_to(target_blk_idx)?;
+        debug_assert!(target_blk_idx == self.blk_idx);
+        if target_blk_idx != num_blocks {
+            debug_assert!(self.blk_iter.is_valid());
+            self.blk_iter.seek_to_key(key);
+            debug_assert!(self.blk_iter.is_valid());
+            debug_assert_ne!(self.key().cmp(&key), Ordering::Less);
+        } else {
+            debug_assert!(target_blk_idx == num_blocks);
+        }
+
+        Ok(())
     }
 
     fn seek_to(&mut self, blk_idx: usize) -> Result<()> {
