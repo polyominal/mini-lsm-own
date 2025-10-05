@@ -14,12 +14,9 @@
 
 use std::sync::Arc;
 
-use bytes::Buf;
-
 use crate::key::{KeySlice, KeyVec};
 
 use super::Block;
-use super::LEN_U16;
 
 /// Iterates on a block.
 pub struct BlockIterator {
@@ -74,7 +71,8 @@ impl BlockIterator {
     pub fn value(&self) -> &[u8] {
         debug_assert!(self.is_valid());
 
-        &self.block.data[self.value_range.0..self.value_range.1]
+        self.block
+            .data_slice(self.value_range.0, self.value_range.1 - self.value_range.0)
     }
 
     /// Returns true if the iterator is valid.
@@ -97,37 +95,11 @@ impl BlockIterator {
     /// Note: You should assume the key-value pairs in the block are sorted when being added by
     /// callers.
     pub fn seek_to_key(&mut self, key: KeySlice) {
-        let num_elements = self.block.offsets.len();
-
-        // we're essentially searching for the smallest index
-        // whose key is not less than the input key
-
-        // invariant: min..=max being the set of candidates
-        let mut min = 0;
-        let mut max = num_elements;
-        while min < max {
-            let idx = (min + max - 1) / 2;
-            debug_assert!(idx < num_elements);
-
-            let (key_start, key_end) = self.parse_key(idx);
-            let key_at_idx = KeySlice::from_slice(&self.block.data[key_start..key_end]);
-
-            if key_at_idx < key {
-                // answer must be greater than min
-                min = idx + 1;
-            } else {
-                // answer must be no greater than max
-                max = idx;
-            }
-        }
-
-        debug_assert!(min == max);
-        self.seek(max);
+        self.seek(self.block.find_key_idx(key));
     }
 
     fn seek(&mut self, idx: usize) {
-        let num_elements = self.block.offsets.len();
-        if num_elements <= idx {
+        if self.block.num_blocks() <= idx {
             // clean up the key and return silently
             self.key.clear();
             // make sure that we're really invalidated
@@ -139,26 +111,14 @@ impl BlockIterator {
         self.idx = idx;
 
         // parse key range
-        let (key_start, key_end) = self.parse_key(idx);
-
+        let (key_start, key_len) = self.block.parse_key(idx);
         // set key
-        self.key
-            .set_from_slice(KeySlice::from_slice(&self.block.data[key_start..key_end]));
+        self.key.set_from_slice(KeySlice::from_slice(
+            self.block.data_slice(key_start, key_len),
+        ));
 
         // set value range
-        let value_start = key_end + LEN_U16;
-        let value_len = (&self.block.data[key_end..value_start]).get_u16() as usize;
+        let (value_start, value_len) = self.block.parse_entry_at(key_start + key_len);
         self.value_range = (value_start, value_start + value_len);
-    }
-
-    fn parse_key_inner(&self, offset: usize) -> (usize, usize) {
-        let key_start = offset + LEN_U16;
-        let key_len = (&self.block.data[offset..key_start]).get_u16() as usize;
-        (key_start, key_start + key_len)
-    }
-
-    /// Parses the key (range) given index.
-    fn parse_key(&self, idx: usize) -> (usize, usize) {
-        self.parse_key_inner(self.block.offsets[idx] as usize)
     }
 }
