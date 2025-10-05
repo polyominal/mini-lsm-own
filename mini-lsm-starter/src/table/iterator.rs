@@ -63,7 +63,7 @@ impl SsTableIterator {
     /// this function.
     pub fn seek_to_key(&mut self, key: KeySlice) -> Result<()> {
         let target_blk_idx = self.table.find_block_idx(key);
-        let num_blocks = self.table.block_meta.len();
+        let num_blocks = self.table.num_of_blocks();
 
         self.seek_to(target_blk_idx)?;
         debug_assert!(target_blk_idx == self.blk_idx);
@@ -81,9 +81,10 @@ impl SsTableIterator {
     }
 
     fn seek_to(&mut self, blk_idx: usize) -> Result<()> {
-        debug_assert!(blk_idx <= self.table.block_meta.len());
+        let num_blocks = self.table.num_of_blocks();
+        debug_assert!(blk_idx <= num_blocks);
         self.blk_idx = blk_idx;
-        if self.blk_idx != self.table.block_meta.len() {
+        if self.blk_idx != num_blocks {
             self.blk_iter =
                 BlockIterator::create_and_seek_to_first(self.table.read_block_cached(blk_idx)?);
         }
@@ -110,8 +111,8 @@ impl StorageIterator for SsTableIterator {
 
     /// Return whether the current block iterator is valid or not.
     fn is_valid(&self) -> bool {
-        debug_assert!(self.blk_idx <= self.table.block_meta.len());
-        self.blk_idx != self.table.block_meta.len()
+        debug_assert!(self.blk_idx <= self.table.num_of_blocks());
+        self.blk_idx != self.table.num_of_blocks()
     }
 
     /// Move to the next `key` in the block.
