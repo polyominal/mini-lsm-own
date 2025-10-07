@@ -319,6 +319,22 @@ impl LsmStorageInner {
             }
         }
 
+        // check L0-SSTs
+        let key = KeySlice::from_slice(key);
+        for i in &snapshot.l0_sstables {
+            let iter =
+                SsTableIterator::create_and_seek_to_key(Arc::clone(&snapshot.sstables[i]), key)?;
+
+            if iter.is_valid() && iter.key() == key {
+                let value = iter.value();
+                return Ok(if !value.is_empty() {
+                    Some(Bytes::copy_from_slice(value))
+                } else {
+                    None
+                });
+            }
+        }
+
         Ok(None)
     }
 
