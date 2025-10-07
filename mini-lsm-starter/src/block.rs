@@ -118,7 +118,6 @@ impl Block {
     }
 
     pub fn data_slice(&self, offset: usize, len: usize) -> &[u8] {
-        debug_assert!(1 <= len);
         debug_assert!(offset + len <= self.data.len());
 
         &self.data[offset..offset + len]

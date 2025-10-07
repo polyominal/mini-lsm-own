@@ -12,19 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
-
 use anyhow::Result;
 
 use super::StorageIterator;
+
+#[derive(PartialEq)]
+enum Which {
+    TakeA,
+    TakeB,
+    Invalid,
+}
 
 /// Merges two iterators of different types into one. If the two iterators have the same key, only
 /// produce the key once and prefer the entry from A.
 pub struct TwoMergeIterator<A: StorageIterator, B: StorageIterator> {
     a: A,
     b: B,
-    // Add fields as need
+    which: Which,
 }
 
 impl<
@@ -33,7 +37,23 @@ impl<
 > TwoMergeIterator<A, B>
 {
     pub fn create(a: A, b: B) -> Result<Self> {
-        unimplemented!()
+        let which = Self::compute_which(&a, &b);
+        Ok(Self { a, b, which })
+    }
+
+    fn compute_which(a: &A, b: &B) -> Which {
+        match (a.is_valid(), b.is_valid()) {
+            (true, true) => {
+                if a.key() <= b.key() {
+                    Which::TakeA
+                } else {
+                    Which::TakeB
+                }
+            }
+            (true, false) => Which::TakeA,
+            (false, true) => Which::TakeB,
+            (false, false) => Which::Invalid,
+        }
     }
 }
 
@@ -45,18 +65,48 @@ impl<
     type KeyType<'a> = A::KeyType<'a>;
 
     fn key(&self) -> Self::KeyType<'_> {
-        unimplemented!()
+        debug_assert!(self.is_valid());
+
+        match self.which {
+            Which::TakeA => self.a.key(),
+            Which::TakeB => self.b.key(),
+            Which::Invalid => unreachable!(),
+        }
     }
 
     fn value(&self) -> &[u8] {
-        unimplemented!()
+        debug_assert!(self.is_valid());
+
+        match self.which {
+            Which::TakeA => self.a.value(),
+            Which::TakeB => self.b.value(),
+            Which::Invalid => unreachable!(),
+        }
     }
 
     fn is_valid(&self) -> bool {
-        unimplemented!()
+        self.which != Which::Invalid
     }
 
     fn next(&mut self) -> Result<()> {
-        unimplemented!()
+        debug_assert!(self.is_valid());
+
+        match self.which {
+            Which::TakeA => {
+                if self.b.is_valid() && self.a.key() == self.b.key() {
+                    self.b.next()?;
+                }
+                self.a.next()?;
+            }
+            Which::TakeB => {
+                self.b.next()?;
+            }
+            Which::Invalid => unreachable!(),
+        }
+
+        // update cached state
+        self.which = Self::compute_which(&self.a, &self.b);
+
+        Ok(())
     }
 }

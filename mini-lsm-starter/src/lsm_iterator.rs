@@ -12,42 +12,76 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
+use std::ops::Bound;
 
 use anyhow::Result;
 use anyhow::bail;
+use bytes::Bytes;
 
+use crate::iterators::two_merge_iterator::TwoMergeIterator;
+use crate::key::KeySlice;
+use crate::table::SsTableIterator;
 use crate::{
     iterators::{StorageIterator, merge_iterator::MergeIterator},
     mem_table::MemTableIterator,
 };
 
 /// Represents the internal type for an LSM iterator. This type will be changed across the course for multiple times.
-type LsmIteratorInner = MergeIterator<MemTableIterator>;
+pub(crate) type LsmIteratorInner =
+    TwoMergeIterator<MergeIterator<MemTableIterator>, MergeIterator<SsTableIterator>>;
 
 pub struct LsmIterator {
     inner: LsmIteratorInner,
+    is_valid: bool,
+    end_bound: Bound<Bytes>,
 }
 
 impl LsmIterator {
-    pub(crate) fn new(iter: LsmIteratorInner) -> Result<Self> {
-        let mut iter = Self { inner: iter };
+    fn compute_is_valid(iter: &LsmIteratorInner, end_bound: &Bound<Bytes>) -> bool {
+        if !iter.is_valid() {
+            return false;
+        }
+
+        let k = iter.key();
+        match end_bound {
+            Bound::Included(end) => k <= KeySlice::from_slice(end.as_ref()),
+            Bound::Excluded(end) => k < KeySlice::from_slice(end.as_ref()),
+            Bound::Unbounded => true,
+        }
+    }
+
+    pub(crate) fn new(iter: LsmIteratorInner, end_bound: Bound<Bytes>) -> Result<Self> {
+        let is_valid = Self::compute_is_valid(&iter, &end_bound);
+        let mut iter = Self {
+            inner: iter,
+            is_valid,
+            end_bound,
+        };
         iter.skip_deleted()?;
 
         Ok(iter)
     }
 
+    fn next_inner(&mut self) -> Result<()> {
+        debug_assert!(self.is_valid());
+
+        self.inner.next()?;
+        self.is_valid =
+            self.inner.is_valid() && Self::compute_is_valid(&self.inner, &self.end_bound);
+
+        Ok(())
+    }
+
     fn skip_deleted(&mut self) -> Result<()> {
         loop {
-            if !self.inner.is_valid() {
+            if !self.is_valid() {
                 break;
             }
             // skip tombstones
             if !self.inner.value().is_empty() {
                 break;
             }
-            self.inner.next()?;
+            self.next_inner()?;
         }
 
         Ok(())
@@ -58,19 +92,25 @@ impl StorageIterator for LsmIterator {
     type KeyType<'a> = &'a [u8];
 
     fn is_valid(&self) -> bool {
-        self.inner.is_valid()
+        self.is_valid
     }
 
     fn key(&self) -> &[u8] {
+        debug_assert!(self.is_valid());
+
         self.inner.key().raw_ref()
     }
 
     fn value(&self) -> &[u8] {
+        debug_assert!(self.is_valid());
+
         self.inner.value()
     }
 
     fn next(&mut self) -> Result<()> {
-        self.inner.next()?;
+        debug_assert!(self.is_valid());
+
+        self.next_inner()?;
         self.skip_deleted()
     }
 }
