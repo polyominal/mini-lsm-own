@@ -32,12 +32,16 @@ use crate::compact::{
     CompactionController, CompactionOptions, LeveledCompactionController, LeveledCompactionOptions,
     SimpleLeveledCompactionController, SimpleLeveledCompactionOptions, TieredCompactionController,
 };
+use crate::iterators::StorageIterator;
 use crate::iterators::merge_iterator::MergeIterator;
-use crate::lsm_iterator::{FusedIterator, LsmIterator};
+use crate::key::KeySlice;
+use crate::lsm_iterator::{FusedIterator, LsmIterator, LsmIteratorInner};
 use crate::manifest::Manifest;
 use crate::mem_table::MemTable;
+use crate::mem_table::map_bound;
 use crate::mvcc::LsmMvccInner;
 use crate::table::SsTable;
+use crate::table::SsTableIterator;
 
 pub type BlockCache = moka::sync::Cache<(usize, usize), Arc<Block>>;
 
@@ -315,6 +319,22 @@ impl LsmStorageInner {
             }
         }
 
+        // check L0-SSTs
+        let key = KeySlice::from_slice(key);
+        for i in &snapshot.l0_sstables {
+            let iter =
+                SsTableIterator::create_and_seek_to_key(Arc::clone(&snapshot.sstables[i]), key)?;
+
+            if iter.is_valid() && iter.key() == key {
+                let value = iter.value();
+                return Ok(if !value.is_empty() {
+                    Some(Bytes::copy_from_slice(value))
+                } else {
+                    None
+                });
+            }
+        }
+
         Ok(None)
     }
 
@@ -412,12 +432,47 @@ impl LsmStorageInner {
     ) -> Result<FusedIterator<LsmIterator>> {
         let snapshot = Arc::clone(&self.state.read());
 
-        // collect MemTableIterators from current memtable + the list of immutable memtables
-        let table_iters = iter::once(&snapshot.memtable)
+        // collect MemTableIterator's from current memtable + the list of immutable memtables
+        let memtable_iters = iter::once(&snapshot.memtable)
             .chain(snapshot.imm_memtables.iter())
             .map(|table| Box::new(table.scan(lower, upper)))
             .collect();
 
-        LsmIterator::new(MergeIterator::create(table_iters)).map(FusedIterator::new)
+        // collect SsTableIterator's
+        let sstable_iters = snapshot
+            .l0_sstables
+            .iter()
+            .map(|i| {
+                let table = Arc::clone(&snapshot.sstables[i]);
+
+                let iter: SsTableIterator = match lower {
+                    Bound::Included(k) => {
+                        SsTableIterator::create_and_seek_to_key(table, KeySlice::from_slice(k))
+                    }
+                    Bound::Excluded(k) => {
+                        let mut iter = SsTableIterator::create_and_seek_to_key(
+                            table,
+                            KeySlice::from_slice(k),
+                        )?;
+                        if iter.is_valid() && iter.key().raw_ref() == k {
+                            iter.next()?;
+                        }
+                        Ok(iter)
+                    }
+                    Bound::Unbounded => SsTableIterator::create_and_seek_to_first(table),
+                }?;
+
+                Ok(Box::new(iter))
+            })
+            .collect::<Result<_>>()?;
+
+        LsmIterator::new(
+            LsmIteratorInner::create(
+                MergeIterator::create(memtable_iters),
+                MergeIterator::create(sstable_iters),
+            )?,
+            map_bound(upper),
+        )
+        .map(FusedIterator::new)
     }
 }

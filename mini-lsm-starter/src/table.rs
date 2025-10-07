@@ -12,10 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
-
-pub(crate) mod bloom;
 mod builder;
 mod iterator;
 
@@ -34,8 +30,6 @@ pub use iterator::SsTableIterator;
 use crate::block::Block;
 use crate::key::{KeyBytes, KeySlice};
 use crate::lsm_storage::BlockCache;
-
-use self::bloom::Bloom;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlockMeta {
@@ -145,7 +139,6 @@ pub struct SsTable {
     block_cache: Option<Arc<BlockCache>>,
     first_key: KeyBytes,
     last_key: KeyBytes,
-    pub(crate) bloom: Option<Bloom>,
     /// The maximum timestamp stored in this SST, implemented in week 3.
     max_ts: u64,
 }
@@ -180,7 +173,6 @@ impl SsTable {
             block_cache,
             first_key,
             last_key,
-            bloom: None,
             max_ts: 0,
         })
     }
@@ -200,7 +192,6 @@ impl SsTable {
             block_cache: None,
             first_key,
             last_key,
-            bloom: None,
             max_ts: 0,
         }
     }
