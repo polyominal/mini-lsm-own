@@ -19,7 +19,6 @@ use anyhow::bail;
 use bytes::Bytes;
 
 use crate::iterators::two_merge_iterator::TwoMergeIterator;
-use crate::key::Key;
 use crate::key::KeySlice;
 use crate::table::SsTableIterator;
 use crate::{
