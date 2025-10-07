@@ -38,6 +38,7 @@ use crate::key::KeySlice;
 use crate::lsm_iterator::{FusedIterator, LsmIterator, LsmIteratorInner};
 use crate::manifest::Manifest;
 use crate::mem_table::MemTable;
+use crate::mem_table::map_bound;
 use crate::mvcc::LsmMvccInner;
 use crate::table::SsTable;
 use crate::table::SsTableIterator;
@@ -449,11 +450,13 @@ impl LsmStorageInner {
             })
             .collect::<Result<_>>()?;
 
-        LsmIteratorInner::create(
-            MergeIterator::create(memtable_iters),
-            MergeIterator::create(sstable_iters),
+        LsmIterator::new(
+            LsmIteratorInner::create(
+                MergeIterator::create(memtable_iters),
+                MergeIterator::create(sstable_iters),
+            )?,
+            map_bound(upper),
         )
-        .map(LsmIterator::new)?
         .map(FusedIterator::new)
     }
 }
