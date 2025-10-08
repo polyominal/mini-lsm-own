@@ -178,15 +178,18 @@ Now that you have multiple memtables, you may modify your read path `get` functi
 * Does it make sense for the memtable to store all write operations instead of only the latest version of a key? For example, the user puts a->1, a->2, and a->3 into the same memtable.
   * depends on the underlying data structure; `SkipMap` naturally overwrites on duplicated keys
 * Is it possible to use other data structures as the memtable in LSM? What are the pros/cons of using the skiplist?
-  * B+Trees maybe
+  * B+Trees maybe: better cache locality; but Rust's `BTreeMap` requires exclusive borrows for writes
+  * skiplist pros: lock-free concurrent reads/writes
   * skiplist cons: poor cache locality, memory overhead?
 * Why do we need a combination of `state` and `state_lock`? Can we only use `state.read()` and `state.write()`?
   * this supports copy-on-write pattern
   * `state` allow many readers to get a view of the table cheaply
   * `state_lock` serializes (?) modifications
 * Why does the order to store and to probe the memtables matter? If a key appears in multiple memtables, which version should you return to the user?
+  * you need newest-to-oldest order to get correct values
 * Is the memory layout of the memtable efficient / does it have good data locality? (Think of how `Byte` is implemented and stored in the skiplist...) What are the possible optimizations to make the memtable more efficient?
   * not great with `Byte` and skiplist
+  * skiplist in particular is backed by node structure with forward pointers, which causes pointer chasing
 * So we are using `parking_lot` locks in this course. Is its read-write lock a fair lock? What might happen to the readers trying to acquire the lock if there is one writer waiting for existing readers to stop?
   * it's not fair
   * from [this](https://docs.rs/parking_lot/latest/parking_lot/type.RwLock.html), readers trying to acquire the lock will block even if the lock is unlocked when there are writers waiting to acquire the lock
