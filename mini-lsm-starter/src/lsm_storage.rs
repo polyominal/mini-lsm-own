@@ -333,9 +333,14 @@ impl LsmStorageInner {
 
         // check L0-SSTs
         let key = KeySlice::from_slice(key);
+        let h = farmhash::fingerprint32(key.raw_ref());
         for i in &snapshot.l0_sstables {
-            let iter =
-                SsTableIterator::create_and_seek_to_key(Arc::clone(&snapshot.sstables[i]), key)?;
+            let table = Arc::clone(&snapshot.sstables[i]);
+            if !table.bloom.as_ref().is_none_or(|b| b.may_contain(h)) {
+                continue;
+            }
+
+            let iter = SsTableIterator::create_and_seek_to_key(table, key)?;
 
             if iter.is_valid() && iter.key() == key {
                 let value = iter.value();
