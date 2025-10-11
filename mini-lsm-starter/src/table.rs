@@ -39,6 +39,8 @@ use crate::lsm_storage::BlockCache;
 
 use self::bloom::Bloom;
 
+const BLOOM_FALSE_POSITIVE_RATE: f64 = 0.01;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlockMeta {
     /// Offset of this data block.
@@ -161,9 +163,20 @@ impl SsTable {
     /// Open SSTable from a file.
     pub fn open(id: usize, block_cache: Option<Arc<BlockCache>>, file: FileObject) -> Result<Self> {
         let file_size = file.size();
-        let meta_offset_end = file_size - mem::size_of::<u32>() as u64;
-        let meta_offset = file.read(meta_offset_end, mem::size_of::<u32>() as u64)?;
-        let meta_offset = meta_offset.as_slice().get_u32() as u64;
+        let bloom_offset_end = file_size - mem::size_of::<u32>() as u64;
+        let bloom_offset = file
+            .read(bloom_offset_end, mem::size_of::<u32>() as u64)?
+            .as_slice()
+            .get_u32() as u64;
+        debug_assert!(bloom_offset < bloom_offset_end);
+        let bloom = file.read(bloom_offset, bloom_offset_end - bloom_offset)?;
+        let bloom = Bloom::decode(bloom.as_slice())?;
+
+        let meta_offset_end = bloom_offset - mem::size_of::<u32>() as u64;
+        let meta_offset = file
+            .read(meta_offset_end, mem::size_of::<u32>() as u64)?
+            .as_slice()
+            .get_u32() as u64;
 
         // assume at least one block
         debug_assert!(meta_offset < meta_offset_end);
@@ -182,7 +195,7 @@ impl SsTable {
             block_cache,
             first_key,
             last_key,
-            bloom: None,
+            bloom: Some(bloom),
             max_ts: 0,
         })
     }

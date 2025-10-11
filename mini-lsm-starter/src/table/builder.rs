@@ -23,7 +23,9 @@ use anyhow::Result;
 use bytes::BufMut;
 use bytes::Bytes;
 
+use super::BLOOM_FALSE_POSITIVE_RATE;
 use super::FileObject;
+use super::bloom::Bloom;
 use super::{BlockMeta, SsTable};
 use crate::key::KeyBytes;
 use crate::{block::BlockBuilder, key::KeySlice, lsm_storage::BlockCache};
@@ -36,6 +38,7 @@ pub struct SsTableBuilder {
     data: Vec<u8>,
     pub(crate) meta: Vec<BlockMeta>,
     block_size: usize,
+    key_hashes: Vec<u32>,
 }
 
 impl SsTableBuilder {
@@ -48,6 +51,7 @@ impl SsTableBuilder {
             data: vec![],
             meta: vec![],
             block_size,
+            key_hashes: vec![],
         }
     }
 
@@ -56,6 +60,8 @@ impl SsTableBuilder {
     /// Note: You should split a new block when the current block is full.(`std::mem::replace` may
     /// be helpful here)
     pub fn add(&mut self, key: KeySlice, value: &[u8]) {
+        self.key_hashes.push(farmhash::fingerprint32(key.raw_ref()));
+
         if self.builder.add(key, value) {
             self.post_add(key, value);
             return;
@@ -110,15 +116,28 @@ impl SsTableBuilder {
         // force finalizing a block
         self.finalize_block();
 
-        // -------------------------------------------------------------------------------------------
-        // |         Block Section         |          Meta Section         |          Extra          |
-        // -------------------------------------------------------------------------------------------
-        // | data block | ... | data block |            metadata           | meta block offset (u32) |
-        // -------------------------------------------------------------------------------------------
+        let bloom = Bloom::build_from_key_hashes(
+            self.key_hashes.as_slice(),
+            Bloom::bloom_bits_per_key(self.key_hashes.len(), BLOOM_FALSE_POSITIVE_RATE),
+        );
+
+        // -----------------------------------------------------------------------------------------------------
+        // |         Block Section         |                            Meta Section                           |
+        // -----------------------------------------------------------------------------------------------------
+        // | data block | ... | data block | metadata | meta block offset | bloom filter | bloom filter offset |
+        // |                               |  varlen  |         u32       |    varlen    |        u32          |
+        // -----------------------------------------------------------------------------------------------------
         let block_meta_offset = self.data.len();
+
+        // block section
         let mut buf_sst = self.data;
+
+        // meta section
         BlockMeta::encode_block_meta(&self.meta, &mut buf_sst);
         buf_sst.put_u32(block_meta_offset as u32);
+        let bloom_offset = buf_sst.len();
+        bloom.encode(&mut buf_sst);
+        buf_sst.put_u32(bloom_offset as u32);
 
         debug_assert!(!self.meta.is_empty());
         let first_key = self.meta[0].first_key.clone();
@@ -132,7 +151,7 @@ impl SsTableBuilder {
             block_cache,
             first_key,
             last_key,
-            bloom: None,
+            bloom: Some(bloom),
             max_ts: 0,
         })
     }
