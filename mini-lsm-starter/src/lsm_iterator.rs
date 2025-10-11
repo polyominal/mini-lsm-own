@@ -19,7 +19,6 @@ use anyhow::bail;
 use bytes::Bytes;
 
 use crate::iterators::two_merge_iterator::TwoMergeIterator;
-use crate::key::KeySlice;
 use crate::table::SsTableIterator;
 use crate::{
     iterators::{StorageIterator, merge_iterator::MergeIterator},
@@ -42,10 +41,10 @@ impl LsmIterator {
             return false;
         }
 
-        let k = iter.key();
+        let k = iter.key().raw_ref();
         match end_bound {
-            Bound::Included(end) => k <= KeySlice::from_slice(end.as_ref()),
-            Bound::Excluded(end) => k < KeySlice::from_slice(end.as_ref()),
+            Bound::Included(end) => k <= end.as_ref(),
+            Bound::Excluded(end) => k < end.as_ref(),
             Bound::Unbounded => true,
         }
     }

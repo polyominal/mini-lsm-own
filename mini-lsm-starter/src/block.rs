@@ -80,6 +80,8 @@ impl Block {
     pub fn find_key_idx(&self, key: KeySlice) -> usize {
         let num_elements = self.num_of_blocks();
 
+        let key = key.raw_ref();
+
         // we're essentially searching for the smallest index
         // whose key is not less than the input key
 
@@ -91,7 +93,7 @@ impl Block {
             debug_assert!(idx < num_elements);
 
             let (key_start, key_len) = self.parse_key(idx);
-            let key_at_idx = KeySlice::from_slice(self.data_slice(key_start, key_len));
+            let key_at_idx = self.data_slice(key_start, key_len);
 
             if key_at_idx < key {
                 // answer must be greater than min
