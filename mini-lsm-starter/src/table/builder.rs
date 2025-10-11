@@ -132,7 +132,7 @@ impl SsTableBuilder {
             block_cache,
             first_key,
             last_key,
-            // for now...
+            bloom: None,
             max_ts: 0,
         })
     }
