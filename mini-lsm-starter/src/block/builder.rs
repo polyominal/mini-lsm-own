@@ -42,7 +42,6 @@ impl BlockBuilder {
             offsets: vec![],
             data: vec![],
             block_size,
-            // what is first_key for? 🤨
             first_key: KeyVec::new(),
         }
     }
@@ -52,6 +51,7 @@ impl BlockBuilder {
     #[must_use]
     pub fn add(&mut self, key: KeySlice, value: &[u8]) -> bool {
         debug_assert!(self.offsets.is_empty() == self.data.is_empty());
+        debug_assert!(!key.is_empty());
 
         // the first pair is allowed to exceed the target block size
         if !self.is_empty() {
@@ -68,9 +68,27 @@ impl BlockBuilder {
 
         self.offsets.push(self.data.len() as u16);
 
-        // key len + key + value len + value + offset
-        self.data.put_u16(key.len() as u16);
-        self.data.put(key.raw_ref());
+        // key overlap len + rest key len + key + value len + value + offset
+        let key_len = key.len() as u16;
+        if !self.first_key.is_empty() {
+            let key_overlap_len = key
+                .raw_ref()
+                .iter()
+                .zip(self.first_key.raw_ref().iter())
+                .take_while(|(l, r)| l == r)
+                .count() as u16;
+            debug_assert!(key_overlap_len <= key_len);
+            debug_assert!(key_overlap_len <= self.first_key.len() as u16);
+            self.data.put_u16(key_overlap_len);
+            self.data.put_u16(key_len - key_overlap_len);
+            self.data.put(&key.raw_ref()[key_overlap_len as usize..]);
+        } else {
+            self.first_key = KeyVec::from_vec(Vec::from(key.raw_ref()));
+            debug_assert!(!self.first_key.is_empty());
+            self.data.put_u16(0);
+            self.data.put_u16(key_len);
+            self.data.put(key.raw_ref());
+        }
         self.data.put_u16(value.len() as u16);
         self.data.put(value);
 

@@ -30,18 +30,21 @@ pub struct BlockIterator {
     /// Current index of the key-value pair, should be in range of [0, num_of_elements)
     idx: usize,
     /// The first key in the block
-    #[allow(dead_code)]
     first_key: KeyVec,
 }
 
 impl BlockIterator {
     fn new(block: Arc<Block>) -> Self {
+        debug_assert!(block.num_of_blocks() >= 1);
+
+        let first_key = block.first_key();
+        debug_assert!(!first_key.is_empty());
         Self {
             block,
             key: KeyVec::new(),
             value_range: (0, 0),
             idx: 0,
-            first_key: KeyVec::new(),
+            first_key: KeyVec::from_vec(first_key),
         }
     }
 
@@ -111,15 +114,17 @@ impl BlockIterator {
         // set idx
         self.idx = idx;
 
-        // parse key range
-        let (key_start, key_len) = self.block.parse_key(idx);
+        // parse key info
+        let (key_overlap_len, rest_key_len, key_offset) = self.block.parse_key(idx);
         // set key
-        self.key.set_from_slice(KeySlice::from_slice(
-            self.block.data_slice(key_start, key_len),
-        ));
+        self.key.clear();
+        self.key
+            .append(&self.first_key.raw_ref()[..key_overlap_len]);
+        self.key
+            .append(self.block.data_slice(key_offset, rest_key_len));
 
         // set value range
-        let (value_start, value_len) = self.block.parse_entry_at(key_start + key_len);
+        let (value_start, value_len) = self.block.parse_value_at(key_offset + rest_key_len);
         self.value_range = (value_start, value_start + value_len);
     }
 }

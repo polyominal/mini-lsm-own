@@ -88,14 +88,21 @@ impl Block {
         // invariant: min..=max being the set of candidates
         let mut min = 0;
         let mut max = num_elements;
+
         while min < max {
             let idx = (min + max - 1) / 2;
             debug_assert!(idx < num_elements);
 
-            let (key_start, key_len) = self.parse_key(idx);
-            let key_at_idx = self.data_slice(key_start, key_len);
+            let (key_overlap_len, rest_key_len, key_offset) = self.parse_key(idx);
+            // set key
+            let mut key_at_idx = vec![];
+            key_at_idx.extend(self.data_slice(
+                mem::size_of::<u16>() + mem::size_of::<u16>(),
+                key_overlap_len,
+            ));
+            key_at_idx.extend(self.data_slice(key_offset, rest_key_len));
 
-            if key_at_idx < key {
+            if key_at_idx.as_slice() < key {
                 // answer must be greater than min
                 min = idx + 1;
             } else {
@@ -107,16 +114,39 @@ impl Block {
         max
     }
 
-    /// Parses the key range given index.
-    pub fn parse_key(&self, idx: usize) -> (usize, usize) {
-        self.parse_entry_at(self.offsets[idx] as usize)
+    /// Parses the key given index, returning (key overlap len, rest key len, offset of rest key)
+    pub fn parse_key(&self, idx: usize) -> (usize, usize, usize) {
+        debug_assert!(idx < self.num_of_blocks());
+        let offset = self.offsets[idx] as usize;
+
+        let key_overlap_len = self.data_slice(offset, mem::size_of::<u16>()).get_u16() as usize;
+        let rest_key_len = self
+            .data_slice(offset + mem::size_of::<u16>(), mem::size_of::<u16>())
+            .get_u16() as usize;
+
+        (
+            key_overlap_len,
+            rest_key_len,
+            offset + mem::size_of::<u16>() + mem::size_of::<u16>(),
+        )
     }
 
-    /// Parses the entry (either key or value) range starting at the given offset.
-    fn parse_entry_at(&self, offset: usize) -> (usize, usize) {
-        let key_len = self.data_slice(offset, mem::size_of::<u16>()).get_u16() as usize;
+    pub fn first_key(&self) -> Vec<u8> {
+        debug_assert!(self.num_of_blocks() >= 1);
 
-        (offset + mem::size_of::<u16>(), key_len)
+        let (key_len, rest_key_len, offset) = self.parse_key(0);
+        debug_assert!(key_len == 0);
+        debug_assert!(rest_key_len >= 1);
+        debug_assert!(offset == mem::size_of::<u16>() + mem::size_of::<u16>());
+
+        Vec::from(self.data_slice(offset, rest_key_len))
+    }
+
+    /// Parses the value range starting at the given offset.
+    fn parse_value_at(&self, offset: usize) -> (usize, usize) {
+        let value_len = self.data_slice(offset, mem::size_of::<u16>()).get_u16() as usize;
+
+        (offset + mem::size_of::<u16>(), value_len)
     }
 
     pub fn data_slice(&self, offset: usize, len: usize) -> &[u8] {
