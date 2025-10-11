@@ -491,19 +491,19 @@ impl LsmStorageInner {
         let sstable_iters = snapshot
             .l0_sstables
             .iter()
-            .map(|i| {
-                let table = Arc::clone(&snapshot.sstables[i]);
-
+            .map(|i| Arc::clone(&snapshot.sstables[i]))
+            .filter(|table| table.has_overlap(lower, upper))
+            .map(|table| {
                 let iter: SsTableIterator = match lower {
-                    Bound::Included(k) => {
-                        SsTableIterator::create_and_seek_to_key(table, KeySlice::from_slice(k))
+                    Bound::Included(lower) => {
+                        SsTableIterator::create_and_seek_to_key(table, KeySlice::from_slice(lower))
                     }
-                    Bound::Excluded(k) => {
+                    Bound::Excluded(lower) => {
                         let mut iter = SsTableIterator::create_and_seek_to_key(
                             table,
-                            KeySlice::from_slice(k),
+                            KeySlice::from_slice(lower),
                         )?;
-                        if iter.is_valid() && iter.key().raw_ref() == k {
+                        if iter.is_valid() && iter.key().raw_ref() == lower {
                             iter.next()?;
                         }
                         Ok(iter)

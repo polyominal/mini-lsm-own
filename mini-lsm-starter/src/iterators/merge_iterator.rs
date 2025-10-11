@@ -131,13 +131,7 @@ impl<I: 'static + for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>> StorageIt
     }
 
     fn num_active_iterators(&self) -> usize {
-        self.iters
-            .iter()
-            .map(|hw| hw.1.num_active_iterators())
-            .sum::<usize>()
-            + self
-                .current
-                .as_ref()
-                .map_or(0, |hw| hw.1.num_active_iterators())
+        let num = |hw: &HeapWrapper<I>| hw.1.num_active_iterators();
+        self.iters.iter().map(num).sum::<usize>() + self.current.as_ref().map_or(0, num)
     }
 }
