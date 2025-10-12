@@ -131,17 +131,6 @@ impl Block {
         )
     }
 
-    pub fn first_key(&self) -> Vec<u8> {
-        debug_assert!(self.num_of_blocks() >= 1);
-
-        let (key_len, rest_key_len, offset) = self.parse_key(0);
-        debug_assert!(key_len == 0);
-        debug_assert!(rest_key_len >= 1);
-        debug_assert!(offset == mem::size_of::<u16>() + mem::size_of::<u16>());
-
-        Vec::from(self.data_slice(offset, rest_key_len))
-    }
-
     /// Parses the value range starting at the given offset.
     fn parse_value_at(&self, offset: usize) -> (usize, usize) {
         let value_len = self.data_slice(offset, mem::size_of::<u16>()).get_u16() as usize;

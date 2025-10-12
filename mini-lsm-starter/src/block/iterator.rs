@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::mem;
 use std::sync::Arc;
 
 use crate::key::{KeySlice, KeyVec};
@@ -37,8 +38,11 @@ impl BlockIterator {
     fn new(block: Arc<Block>) -> Self {
         debug_assert!(block.num_of_blocks() >= 1);
 
-        let first_key = block.first_key();
-        debug_assert!(!first_key.is_empty());
+        let (len, rest_len, start) = block.parse_key(0);
+        debug_assert!(len == 0);
+        debug_assert!(rest_len >= 1);
+        debug_assert!(start == mem::size_of::<u16>() + mem::size_of::<u16>());
+        let first_key = Vec::from(block.data_slice(start, rest_len));
         Self {
             block,
             key: KeyVec::new(),
@@ -115,16 +119,14 @@ impl BlockIterator {
         self.idx = idx;
 
         // parse key info
-        let (key_overlap_len, rest_key_len, key_offset) = self.block.parse_key(idx);
+        let (overlap_len, key_len, start) = self.block.parse_key(idx);
         // set key
         self.key.clear();
-        self.key
-            .append(&self.first_key.raw_ref()[..key_overlap_len]);
-        self.key
-            .append(self.block.data_slice(key_offset, rest_key_len));
+        self.key.append(&self.first_key.raw_ref()[..overlap_len]);
+        self.key.append(self.block.data_slice(start, key_len));
 
         // set value range
-        let (value_start, value_len) = self.block.parse_value_at(key_offset + rest_key_len);
+        let (value_start, value_len) = self.block.parse_value_at(start + key_len);
         self.value_range = (value_start, value_start + value_len);
     }
 }
