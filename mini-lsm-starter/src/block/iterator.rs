@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::mem;
 use std::sync::Arc;
 
+use crate::key::LEN_U16;
 use crate::key::{KeySlice, KeyVec};
 
 use super::Block;
@@ -41,7 +41,7 @@ impl BlockIterator {
         let (len, rest_len, start) = block.parse_key(0);
         debug_assert!(len == 0);
         debug_assert!(rest_len >= 1);
-        debug_assert!(start == mem::size_of::<u16>() + mem::size_of::<u16>());
+        debug_assert!(start == LEN_U16 + LEN_U16);
         let first_key = Vec::from(block.data_slice(start, rest_len));
         Self {
             block,

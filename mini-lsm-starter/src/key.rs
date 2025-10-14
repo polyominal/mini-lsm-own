@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt::Debug;
+use std::mem;
 
 use bytes::Bytes;
 
@@ -23,6 +24,9 @@ pub struct Key<T: AsRef<[u8]>>(T);
 pub type KeySlice<'a> = Key<&'a [u8]>;
 pub type KeyVec = Key<Vec<u8>>;
 pub type KeyBytes = Key<Bytes>;
+
+pub(crate) const LEN_U16: usize = mem::size_of::<u16>();
+pub(crate) const LEN_U32: usize = mem::size_of::<u32>();
 
 impl<T: AsRef<[u8]>> Key<T> {
     pub fn into_inner(self) -> T {

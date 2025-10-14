@@ -18,7 +18,6 @@ mod builder;
 mod iterator;
 
 use std::fs::File;
-use std::mem;
 use std::ops::Bound;
 use std::path::Path;
 use std::sync::Arc;
@@ -31,6 +30,8 @@ use bytes::BufMut;
 pub use iterator::SsTableIterator;
 
 use crate::block::Block;
+use crate::key::LEN_U16;
+use crate::key::LEN_U32;
 use crate::key::{KeyBytes, KeySlice};
 use crate::lsm_storage::BlockCache;
 
@@ -56,13 +57,7 @@ impl BlockMeta {
         // reserve space for metadata
         let len_delta = block_meta
             .iter()
-            .map(|meta| {
-                mem::size_of::<u32>()
-                    + mem::size_of::<u16>()
-                    + meta.first_key.len()
-                    + mem::size_of::<u16>()
-                    + meta.last_key.len()
-            })
+            .map(|meta| LEN_U32 + LEN_U16 + meta.first_key.len() + LEN_U16 + meta.last_key.len())
             .sum();
 
         let len_before = buf.len();
@@ -160,18 +155,18 @@ impl SsTable {
     /// Open SSTable from a file.
     pub fn open(id: usize, block_cache: Option<Arc<BlockCache>>, file: FileObject) -> Result<Self> {
         let file_size = file.size();
-        let bloom_offset_end = file_size - mem::size_of::<u32>() as u64;
+        let bloom_offset_end = file_size - LEN_U32 as u64;
         let bloom_offset = file
-            .read(bloom_offset_end, mem::size_of::<u32>() as u64)?
+            .read(bloom_offset_end, LEN_U32 as u64)?
             .as_slice()
             .get_u32() as u64;
         debug_assert!(bloom_offset < bloom_offset_end);
         let bloom = file.read(bloom_offset, bloom_offset_end - bloom_offset)?;
         let bloom = Bloom::decode(bloom.as_slice())?;
 
-        let meta_offset_end = bloom_offset - mem::size_of::<u32>() as u64;
+        let meta_offset_end = bloom_offset - LEN_U32 as u64;
         let meta_offset = file
-            .read(meta_offset_end, mem::size_of::<u32>() as u64)?
+            .read(meta_offset_end, LEN_U32 as u64)?
             .as_slice()
             .get_u32() as u64;
 
