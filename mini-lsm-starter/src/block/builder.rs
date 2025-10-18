@@ -15,10 +15,9 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
-use std::mem;
-
 use bytes::BufMut;
 
+use crate::key::LEN_U16;
 use crate::key::{KeySlice, KeyVec};
 
 use super::Block;
@@ -56,10 +55,10 @@ impl BlockBuilder {
         // the first pair is allowed to exceed the target block size
         if !self.is_empty() {
             let size_after_add = self.data.len()
-                + (mem::size_of::<u16>() + key.len())
-                + (mem::size_of::<u16>() + value.len())
-                + (self.offsets.len() + 1) * mem::size_of::<u16>()
-                + mem::size_of::<u16>();
+                + (LEN_U16 + key.len())
+                + (LEN_U16 + value.len())
+                + (self.offsets.len() + 1) * LEN_U16
+                + LEN_U16;
             if self.block_size < size_after_add {
                 // an overflow
                 return false;
