@@ -150,12 +150,12 @@ impl<I: StorageIterator> StorageIterator for FusedIterator<I> {
     }
 
     fn key(&self) -> Self::KeyType<'_> {
-        assert!(self.is_valid(), "calling key() on an invalid FusedIterator");
+        debug_assert!(self.is_valid(), "calling key() on an invalid FusedIterator");
         self.iter.key()
     }
 
     fn value(&self) -> &[u8] {
-        assert!(
+        debug_assert!(
             self.is_valid(),
             "calling value() on an invalid FusedIterator"
         );

@@ -129,12 +129,11 @@ impl SsTableBuilder {
         // -----------------------------------------------------------------------------------------------------
         let block_meta_offset = self.data.len();
 
-        // block section
         let mut buf_sst = self.data;
 
-        // meta section
         BlockMeta::encode_block_meta(&self.meta, &mut buf_sst);
         buf_sst.put_u32(block_meta_offset as u32);
+
         let bloom_offset = buf_sst.len();
         bloom.encode(&mut buf_sst);
         buf_sst.put_u32(bloom_offset as u32);
