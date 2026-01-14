@@ -148,6 +148,14 @@ impl LsmStorageInner {
 
                 // now build compacted SSTs from the iterator
                 let mut compacted = Vec::new();
+                let mut add_table = |builder: SsTableBuilder| -> Result<()> {
+                    let id = self.next_sst_id();
+                    let path = self.path_of_sst(id);
+                    let sst = Arc::new(builder.build(id, Some(self.block_cache.clone()), path)?);
+                    compacted.push(sst);
+                    Ok(())
+                };
+
                 let mut builder = None;
                 while iter.is_valid() {
                     if builder.is_none() {
@@ -163,14 +171,11 @@ impl LsmStorageInner {
                     iter.next()?;
 
                     if self.options.target_sst_size <= builder_mut.estimated_size() {
-                        // persist this SST
-                        let id = self.next_sst_id();
-                        let path = self.path_of_sst(id);
-                        let builder = builder.take().unwrap();
-                        let sst =
-                            Arc::new(builder.build(id, Some(self.block_cache.clone()), path)?);
-                        compacted.push(sst);
+                        add_table(builder.take().unwrap())?;
                     }
+                }
+                if let Some(builder) = builder {
+                    add_table(builder)?;
                 }
 
                 Ok(compacted)
@@ -193,17 +198,32 @@ impl LsmStorageInner {
 
         eprintln!("force full compaction: {task:?}");
         let compacted = self.compact(&snapshot, &task)?;
+        drop(snapshot);
 
-        {
-            let state_lock = self.state_lock.lock();
-            let mut new_state = self.state.read().as_ref().clone();
-            assert_eq!(l1_sstables, new_state.levels[0].1);
-            for i in l0_sstables.iter().chain(l1_sstables.iter()) {
-                new_state.sstables.remove(i).unwrap();
-            }
+        let state_lock = self.state_lock.lock();
+        let mut new_state = self.state.read().as_ref().clone();
+        assert_eq!(l0_sstables, new_state.l0_sstables);
+        assert_eq!(l1_sstables, new_state.levels[0].1);
 
-            todo!();
+        // remove all L0 + L1 SSTs
+        for i in l0_sstables.iter().chain(l1_sstables.iter()) {
+            new_state.sstables.remove(i).unwrap();
         }
+
+        // insert compacted SSTs to L1
+        let mut new_l1_sstables = Vec::with_capacity(compacted.len());
+        for sst in compacted {
+            let id = sst.sst_id();
+            new_state.sstables.insert(id, sst);
+            new_l1_sstables.push(id);
+        }
+        new_state.l0_sstables.clear();
+        new_state.levels[0].1 = new_l1_sstables;
+
+        // update state
+        *self.state.write() = Arc::new(new_state);
+
+        Ok(())
     }
 
     fn trigger_compaction(&self) -> Result<()> {
