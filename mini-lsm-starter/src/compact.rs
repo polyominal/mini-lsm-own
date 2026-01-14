@@ -30,8 +30,10 @@ pub use simple_leveled::{
 };
 pub use tiered::{TieredCompactionController, TieredCompactionOptions, TieredCompactionTask};
 
+use crate::iterators::StorageIterator;
+use crate::iterators::merge_iterator::MergeIterator;
 use crate::lsm_storage::{LsmStorageInner, LsmStorageState};
-use crate::table::SsTable;
+use crate::table::{SsTable, SsTableBuilder, SsTableIterator};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum CompactionTask {
@@ -133,7 +135,45 @@ impl LsmStorageInner {
                 l0_sstables,
                 l1_sstables,
             } => {
-                todo!();
+                let iters = l0_sstables
+                    .iter()
+                    .chain(l1_sstables.iter())
+                    .map(|i| Arc::clone(&snapshot.sstables[i]))
+                    .map(|table| -> Result<_> {
+                        let iter = SsTableIterator::create_and_seek_to_first(table)?;
+                        Ok(Box::new(iter))
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                let mut iter = MergeIterator::create(iters);
+
+                // now build compacted SSTs from the iterator
+                let mut compacted = Vec::new();
+                let mut builder = None;
+                while iter.is_valid() {
+                    if builder.is_none() {
+                        builder = Some(SsTableBuilder::new(self.options.block_size));
+                    }
+
+                    // append the tuple
+                    let builder_mut = builder.as_mut().unwrap();
+                    let (key, value) = (iter.key(), iter.value());
+                    if !value.is_empty() {
+                        builder_mut.add(key, value);
+                    }
+                    iter.next()?;
+
+                    if self.options.target_sst_size <= builder_mut.estimated_size() {
+                        // persist this SST
+                        let id = self.next_sst_id();
+                        let path = self.path_of_sst(id);
+                        let builder = builder.take().unwrap();
+                        let sst =
+                            Arc::new(builder.build(id, Some(self.block_cache.clone()), path)?);
+                        compacted.push(sst);
+                    }
+                }
+
+                Ok(compacted)
             }
             _ => {
                 unimplemented!();
@@ -147,14 +187,23 @@ impl LsmStorageInner {
         let l0_sstables = snapshot.l0_sstables.clone();
         let l1_sstables = snapshot.levels[0].1.clone();
         let task = CompactionTask::ForceFullCompaction {
-            l0_sstables,
-            l1_sstables,
+            l0_sstables: l0_sstables.clone(),
+            l1_sstables: l1_sstables.clone(),
         };
 
         eprintln!("force full compaction: {task:?}");
         let compacted = self.compact(&snapshot, &task)?;
 
-        todo!();
+        {
+            let state_lock = self.state_lock.lock();
+            let mut new_state = self.state.read().as_ref().clone();
+            assert_eq!(l1_sstables, new_state.levels[0].1);
+            for i in l0_sstables.iter().chain(l1_sstables.iter()) {
+                new_state.sstables.remove(i).unwrap();
+            }
+
+            todo!();
+        }
     }
 
     fn trigger_compaction(&self) -> Result<()> {
