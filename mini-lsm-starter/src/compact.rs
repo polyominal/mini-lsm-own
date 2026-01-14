@@ -123,12 +123,38 @@ pub enum CompactionOptions {
 }
 
 impl LsmStorageInner {
-    fn compact(&self, _task: &CompactionTask) -> Result<Vec<Arc<SsTable>>> {
-        unimplemented!()
+    fn compact(
+        &self,
+        snapshot: &Arc<LsmStorageState>,
+        task: &CompactionTask,
+    ) -> Result<Vec<Arc<SsTable>>> {
+        match task {
+            CompactionTask::ForceFullCompaction {
+                l0_sstables,
+                l1_sstables,
+            } => {
+                todo!();
+            }
+            _ => {
+                unimplemented!();
+            }
+        }
     }
 
     pub fn force_full_compaction(&self) -> Result<()> {
-        unimplemented!()
+        let snapshot = self.state.read().clone();
+
+        let l0_sstables = snapshot.l0_sstables.clone();
+        let l1_sstables = snapshot.levels[0].1.clone();
+        let task = CompactionTask::ForceFullCompaction {
+            l0_sstables,
+            l1_sstables,
+        };
+
+        eprintln!("force full compaction: {task:?}");
+        let compacted = self.compact(&snapshot, &task)?;
+
+        todo!();
     }
 
     fn trigger_compaction(&self) -> Result<()> {
