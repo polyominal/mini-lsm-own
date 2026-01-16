@@ -29,17 +29,85 @@ use crate::{
 /// iterators when initializing this iterator to reduce the overhead of seeking.
 pub struct SstConcatIterator {
     current: Option<SsTableIterator>,
-    next_sst_idx: usize,
+    current_sst_idx: usize,
     sstables: Vec<Arc<SsTable>>,
 }
 
 impl SstConcatIterator {
     pub fn create_and_seek_to_first(sstables: Vec<Arc<SsTable>>) -> Result<Self> {
-        unimplemented!()
+        if sstables.is_empty() {
+            return Ok(Self {
+                current: None,
+                current_sst_idx: 0,
+                sstables,
+            });
+        }
+
+        let current = SsTableIterator::create_and_seek_to_first(Arc::clone(&sstables[0]))?;
+        let (current, current_sst_idx) = Self::move_until_valid_or_end(current, 0, &sstables)?;
+        Ok(Self {
+            current,
+            current_sst_idx,
+            sstables,
+        })
     }
 
     pub fn create_and_seek_to_key(sstables: Vec<Arc<SsTable>>, key: KeySlice) -> Result<Self> {
-        unimplemented!()
+        if sstables.is_empty() {
+            return Ok(Self {
+                current: None,
+                current_sst_idx: 0,
+                sstables,
+            });
+        }
+
+        let mut current = SsTableIterator::create_and_seek_to_key(Arc::clone(&sstables[0]), key)?;
+        let mut current_sst_idx = 0;
+        loop {
+            if current.is_valid() {
+                return Ok(Self {
+                    current: Some(current),
+                    current_sst_idx,
+                    sstables,
+                });
+            }
+
+            current_sst_idx += 1;
+            if current_sst_idx == sstables.len() {
+                return Ok(Self {
+                    current: None,
+                    current_sst_idx: sstables.len(),
+                    sstables,
+                });
+            }
+
+            current = SsTableIterator::create_and_seek_to_key(
+                Arc::clone(&sstables[current_sst_idx]),
+                key,
+            )?;
+        }
+    }
+
+    fn move_until_valid_or_end(
+        mut current: SsTableIterator,
+        mut current_sst_idx: usize,
+        sstables: &[Arc<SsTable>],
+    ) -> Result<(Option<SsTableIterator>, usize)> {
+        assert!(current_sst_idx < sstables.len());
+
+        loop {
+            if current.is_valid() {
+                return Ok((Some(current), current_sst_idx));
+            }
+
+            current_sst_idx += 1;
+            if current_sst_idx == sstables.len() {
+                return Ok((None, current_sst_idx));
+            }
+
+            current =
+                SsTableIterator::create_and_seek_to_first(Arc::clone(&sstables[current_sst_idx]))?;
+        }
     }
 }
 
@@ -47,19 +115,40 @@ impl StorageIterator for SstConcatIterator {
     type KeyType<'a> = KeySlice<'a>;
 
     fn key(&self) -> KeySlice<'_> {
-        unimplemented!()
+        // precondition: self.is_valid()
+        assert!(self.is_valid());
+
+        self.current.as_ref().unwrap().key()
     }
 
     fn value(&self) -> &[u8] {
-        unimplemented!()
+        // precondition: self.is_valid()
+        assert!(self.is_valid());
+
+        self.current.as_ref().unwrap().value()
     }
 
     fn is_valid(&self) -> bool {
-        unimplemented!()
+        let Some(current) = self.current.as_ref() else {
+            return false;
+        };
+        current.is_valid()
     }
 
     fn next(&mut self) -> Result<()> {
-        unimplemented!()
+        // precondition: self.is_valid()
+        assert!(self.is_valid());
+
+        // move
+        self.current.as_mut().unwrap().next()?;
+
+        (self.current, self.current_sst_idx) = Self::move_until_valid_or_end(
+            self.current.take().unwrap(),
+            self.current_sst_idx,
+            &self.sstables,
+        )?;
+
+        Ok(())
     }
 
     fn num_active_iterators(&self) -> usize {
