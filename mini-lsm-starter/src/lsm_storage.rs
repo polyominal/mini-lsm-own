@@ -34,9 +34,11 @@ use crate::compact::{
     SimpleLeveledCompactionController, SimpleLeveledCompactionOptions, TieredCompactionController,
 };
 use crate::iterators::StorageIterator;
+use crate::iterators::concat_iterator::SstConcatIterator;
 use crate::iterators::merge_iterator::MergeIterator;
+use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::key::KeySlice;
-use crate::lsm_iterator::{FusedIterator, LsmIterator, LsmIteratorInner};
+use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::Manifest;
 use crate::mem_table::MemTable;
 use crate::mem_table::map_bound;
@@ -486,14 +488,13 @@ impl LsmStorageInner {
     ) -> Result<FusedIterator<LsmIterator>> {
         let snapshot = Arc::clone(&self.state.read());
 
-        // collect MemTableIterator's from current memtable + the list of immutable memtables
         let memtable_iters = iter::once(&snapshot.memtable)
             .chain(snapshot.imm_memtables.iter())
             .map(|table| Box::new(table.scan(lower, upper)))
             .collect();
+        let memtable_iter = MergeIterator::create(memtable_iters);
 
-        // collect SsTableIterator's
-        let sstable_iters = snapshot
+        let l0_iters = snapshot
             .l0_sstables
             .iter()
             .map(|i| Arc::clone(&snapshot.sstables[i]))
@@ -519,14 +520,34 @@ impl LsmStorageInner {
                 Ok(Box::new(iter))
             })
             .collect::<Result<_>>()?;
+        let l0_iter = MergeIterator::create(l0_iters);
 
-        LsmIterator::new(
-            LsmIteratorInner::create(
-                MergeIterator::create(memtable_iters),
-                MergeIterator::create(sstable_iters),
-            )?,
-            map_bound(upper),
-        )
-        .map(FusedIterator::new)
+        let l1_tables = snapshot.levels[0]
+            .1
+            .iter()
+            .map(|i| Arc::clone(&snapshot.sstables[i]))
+            .filter(|table| table.has_overlap(lower, upper))
+            .collect();
+        let l1_iter = match lower {
+            Bound::Included(key) => {
+                SstConcatIterator::create_and_seek_to_key(l1_tables, KeySlice::from_slice(key))?
+            }
+            Bound::Excluded(key) => {
+                let mut iter = SstConcatIterator::create_and_seek_to_key(
+                    l1_tables,
+                    KeySlice::from_slice(key),
+                )?;
+                if iter.is_valid() && iter.key().raw_ref() == key {
+                    iter.next()?;
+                }
+                iter
+            }
+            Bound::Unbounded => SstConcatIterator::create_and_seek_to_first(l1_tables)?,
+        };
+
+        let iter = TwoMergeIterator::create(memtable_iter, l0_iter)?;
+        let iter = TwoMergeIterator::create(iter, l1_iter)?;
+
+        LsmIterator::new(iter, map_bound(upper)).map(FusedIterator::new)
     }
 }
