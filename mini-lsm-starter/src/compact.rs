@@ -31,7 +31,9 @@ pub use simple_leveled::{
 pub use tiered::{TieredCompactionController, TieredCompactionOptions, TieredCompactionTask};
 
 use crate::iterators::StorageIterator;
+use crate::iterators::concat_iterator::SstConcatIterator;
 use crate::iterators::merge_iterator::MergeIterator;
+use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::lsm_storage::{LsmStorageInner, LsmStorageState};
 use crate::table::{SsTable, SsTableBuilder, SsTableIterator};
 
@@ -135,16 +137,21 @@ impl LsmStorageInner {
                 l0_sstables,
                 l1_sstables,
             } => {
-                let iters = l0_sstables
+                let l0_iter = l0_sstables
                     .iter()
-                    .chain(l1_sstables.iter())
                     .map(|i| Arc::clone(&snapshot.sstables[i]))
                     .map(|table| -> Result<_> {
                         let iter = SsTableIterator::create_and_seek_to_first(table)?;
                         Ok(Box::new(iter))
                     })
-                    .collect::<Result<Vec<_>>>()?;
-                let mut iter = MergeIterator::create(iters);
+                    .collect::<Result<Vec<_>>>()
+                    .map(MergeIterator::create)?;
+                let l1_sstables = l1_sstables
+                    .iter()
+                    .map(|i| Arc::clone(&snapshot.sstables[i]))
+                    .collect();
+                let l1_iter = SstConcatIterator::create_and_seek_to_first(l1_sstables)?;
+                let mut iter = TwoMergeIterator::create(l0_iter, l1_iter)?;
 
                 // now build compacted SSTs from the iterator
                 let mut compacted = Vec::new();
