@@ -333,13 +333,12 @@ impl LsmStorageInner {
             }
         }
 
-        // check L0-SSTs
         let key = KeySlice::from_slice(key);
         let h = farmhash::fingerprint32(key.raw_ref());
-        for i in &snapshot.l0_sstables {
+        let get_from_sst = |i: &usize| -> Result<Option<Option<Bytes>>> {
             let table = Arc::clone(&snapshot.sstables[i]);
             if !table.bloom.as_ref().is_none_or(|b| b.may_contain(h)) {
-                continue;
+                return Ok(None);
             }
 
             let iter = SsTableIterator::create_and_seek_to_key(table, key)?;
@@ -347,10 +346,26 @@ impl LsmStorageInner {
             if iter.is_valid() && iter.key() == key {
                 let value = iter.value();
                 return Ok(if !value.is_empty() {
-                    Some(Bytes::copy_from_slice(value))
+                    Some(Some(Bytes::copy_from_slice(value)))
                 } else {
-                    None
+                    Some(None)
                 });
+            }
+
+            Ok(None)
+        };
+
+        // check L0-SSTs
+        for i in &snapshot.l0_sstables {
+            if let Some(result) = get_from_sst(i)? {
+                return Ok(result);
+            }
+        }
+
+        // check L1-SSTs
+        for i in &snapshot.levels[0].1 {
+            if let Some(result) = get_from_sst(i)? {
+                return Ok(result);
             }
         }
 
