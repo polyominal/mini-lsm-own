@@ -126,12 +126,20 @@ scan 2000 2333
 ## Test Your Understanding
 
 * What are the definitions of read/write/space amplifications? (This is covered in the overview chapter)
+  * read amp: [actual read size] over [logical read size]
+  * write amp: [actual write size] over [logical write size]
+  * space amp: [actual storage size] over [logical size]
 * What are the ways to accurately compute the read/write/space amplifications, and what are the ways to estimate them?
+  * TODO
 * Is it correct that a key will take some storage space even if a user requests to delete it?
+  * yes, it takes storage space until physically removed by some compaction operation
 * Given that compaction takes a lot of write bandwidth and read bandwidth and may interfere with foreground operations, it is a good idea to postpone compaction when there are large write flow. It is even beneficial to stop/pause existing compaction tasks in this situation. What do you think of this idea? (Read the [SILK: Preventing Latency Spikes in Log-Structured Merge Key-Value Stores](https://www.usenix.org/conference/atc19/presentation/balmau) paper!)
 * Is it a good idea to use/fill the block cache for compactions? Or is it better to fully bypass the block cache when compaction?
+  * cache is precious
 * Does it make sense to have a `struct ConcatIterator<I: StorageIterator>` in the system?
+  * yes, these iterators are useful when things come in sorted runs
 * Some researchers/engineers propose to offload compaction to a remote server or a serverless lambda function. What are the benefits, and what might be the potential challenges and performance impacts of doing remote compaction? (Think of the point when a compaction completes and what happens to the block cache on the next read request...)
+  * network overhead?
 
 We do not provide reference answers to the questions, and feel free to discuss about them in the Discord community.
 
