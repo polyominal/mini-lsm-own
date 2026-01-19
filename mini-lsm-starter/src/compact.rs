@@ -19,6 +19,7 @@ mod leveled;
 mod simple_leveled;
 mod tiered;
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -217,14 +218,23 @@ impl LsmStorageInner {
             new_state.sstables.remove(i).unwrap();
         }
 
-        // insert compacted SSTs to L1
+        // L0
+        let mut l0_to_remove: HashSet<_> = l0_sstables.iter().copied().collect();
+        new_state.l0_sstables = new_state
+            .l0_sstables
+            .iter()
+            .filter(|i| !l0_to_remove.remove(i))
+            .copied()
+            .collect();
+        assert!(l0_to_remove.is_empty());
+
+        // L1
         let mut new_l1_sstables = Vec::with_capacity(compacted.len());
         for sst in compacted {
             let id = sst.sst_id();
             new_state.sstables.insert(id, sst);
             new_l1_sstables.push(id);
         }
-        new_state.l0_sstables.clear();
         new_state.levels[0].1 = new_l1_sstables;
 
         // update state
