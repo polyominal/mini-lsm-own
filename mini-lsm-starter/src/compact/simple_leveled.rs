@@ -47,9 +47,41 @@ impl SimpleLeveledCompactionController {
     /// Returns `None` if no compaction needs to be scheduled. The order of SSTs in the compaction task id vector matters.
     pub fn generate_compaction_task(
         &self,
-        _snapshot: &LsmStorageState,
+        snapshot: &LsmStorageState,
     ) -> Option<SimpleLeveledCompactionTask> {
-        unimplemented!()
+        debug_assert_eq!(snapshot.levels[0].0, 1);
+
+        if self.options.level0_file_num_compaction_trigger <= snapshot.l0_sstables.len() {
+            return Some(SimpleLeveledCompactionTask {
+                upper_level: None,
+                upper_level_sst_ids: snapshot.l0_sstables.clone(),
+                lower_level: snapshot.levels[0].0,
+                lower_level_sst_ids: snapshot.levels[0].1.clone(),
+                is_lower_level_bottom_level: false,
+            });
+        }
+
+        for window in snapshot.levels.windows(2) {
+            let (upper, lower) = (&window[0], &window[1]);
+            if lower.1.is_empty() {
+                continue;
+            }
+
+            let ratio = 100 * upper.1.len() / lower.1.len();
+            if ratio < self.options.size_ratio_percent {
+                continue;
+            }
+
+            return Some(SimpleLeveledCompactionTask {
+                upper_level: Some(upper.0),
+                upper_level_sst_ids: upper.1.clone(),
+                lower_level: lower.0,
+                lower_level_sst_ids: lower.1.clone(),
+                is_lower_level_bottom_level: false,
+            });
+        }
+
+        None
     }
 
     /// Apply the compaction result.
