@@ -10,7 +10,7 @@ In this chapter, you will:
 
 * Implement SST encoding and metadata encoding.
 * Implement SST decoding and iterator.
-  
+
 To copy the test cases into the starter code and run them,
 
 ```
@@ -91,13 +91,23 @@ At this point, you may change your table iterator to use `read_block_cached` ins
 
 * What is the time complexity of seeking a key in the SST?
 * Where does the cursor stop when you seek a non-existent key in your implementation?
+  * it's essentially doing `std::lower_bound`
 * Is it possible (or necessary) to do in-place updates of SST files?
+  * SSTs are immutable by design?
 * An SST is usually large (i.e., 256MB). In this case, the cost of copying/expanding the `Vec` would be significant. Does your implementation allocate enough space for your SST builder in advance? How did you implement it?
+  * not yet ((
+  * TODO: make use of `estimated_size()`?
 * Looking at the `moka` block cache, why does it return `Arc<Error>` instead of the original `Error`?
+  * Claude's guess: multiple callers can fail with the same error
 * Does the usage of a block cache guarantee that there will be at most a fixed number of blocks in memory? For example, if you have a `moka` block cache of 4GB and block size of 4KB, will there be more than 4GB/4KB number of blocks in memory at the same time?
+  * with `Arc<Block>`, a block can stay in memory even after being evicted?
+  * TODO: `moka`'s implementation
 * Is it possible to store columnar data (i.e., a table of 100 integer columns) in an LSM engine? Is the current SST format still a good choice?
+  - no. think of read amplification?
 * Consider the case that the LSM engine is built on object store services (i.e., S3). How would you optimize/change the SST format/parameters and the block cache to make it suitable for such services?
+  * try larger blocks
 * For now, we load the index of all SSTs into the memory. Assume you have a 16GB memory reserved for the indexes, can you estimate the maximum size of the database your LSM system can support? (That's why you need an index cache!)
+  * why index cache: most SSTs are cold at some given point in time
 
 We do not provide reference answers to the questions, and feel free to discuss about them in the Discord community.
 
