@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 
 use crate::lsm_storage::LsmStorageState;
@@ -115,9 +117,17 @@ impl SimpleLeveledCompactionController {
         } else {
             debug_assert_eq!(task.lower_level, 1);
 
-            debug_assert_eq!(task.upper_level_sst_ids, snapshot.l0_sstables);
-            removed.extend(&snapshot.l0_sstables);
-            snapshot.l0_sstables.clear();
+            let mut l0_removed: HashSet<usize> = task.upper_level_sst_ids.iter().copied().collect();
+            let l0_updated: Vec<usize> = snapshot
+                .l0_sstables
+                .iter()
+                .copied()
+                .filter(|i| !l0_removed.remove(i))
+                .collect();
+            // removed L0-SSTs must be a subset of that in the snapshot
+            debug_assert!(l0_removed.is_empty());
+            removed.extend(&task.upper_level_sst_ids);
+            snapshot.l0_sstables = l0_updated;
         }
 
         let lower_idx = task.lower_level - 1;

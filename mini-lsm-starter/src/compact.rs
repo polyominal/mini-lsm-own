@@ -34,6 +34,7 @@ use crate::iterators::StorageIterator;
 use crate::iterators::concat_iterator::SstConcatIterator;
 use crate::iterators::merge_iterator::MergeIterator;
 use crate::iterators::two_merge_iterator::TwoMergeIterator;
+use crate::key::KeySlice;
 use crate::lsm_storage::{LsmStorageInner, LsmStorageState};
 use crate::table::{SsTable, SsTableBuilder, SsTableIterator};
 
@@ -137,55 +138,76 @@ impl LsmStorageInner {
                 l0_sstables,
                 l1_sstables,
             } => {
-                let l0_iter = l0_sstables
-                    .iter()
-                    .map(|i| Arc::clone(&snapshot.sstables[i]))
-                    .map(|table| -> Result<_> {
-                        let iter = SsTableIterator::create_and_seek_to_first(table)?;
-                        Ok(Box::new(iter))
-                    })
-                    .collect::<Result<Vec<_>>>()
-                    .map(MergeIterator::create)?;
-                let l1_sstables = l1_sstables
-                    .iter()
-                    .map(|i| Arc::clone(&snapshot.sstables[i]))
-                    .collect();
-                let l1_iter = SstConcatIterator::create_and_seek_to_first(l1_sstables)?;
-                let mut iter = TwoMergeIterator::create(l0_iter, l1_iter)?;
+                let l0_iter = MergeIterator::create(
+                    l0_sstables
+                        .iter()
+                        .map(|i| {
+                            let table = Arc::clone(&snapshot.sstables[i]);
+                            let iter = SsTableIterator::create_and_seek_to_first(table)?;
+                            Ok(Box::new(iter))
+                        })
+                        .collect::<Result<Vec<_>>>()?,
+                );
+                let l1_iter = SstConcatIterator::create_and_seek_to_first(
+                    l1_sstables
+                        .iter()
+                        .map(|i| Arc::clone(&snapshot.sstables[i]))
+                        .collect(),
+                )?;
+                let iter = TwoMergeIterator::create(l0_iter, l1_iter)?;
+                self.sst_from_iter(iter)
+            }
+            CompactionTask::Simple(SimpleLeveledCompactionTask {
+                upper_level,
+                upper_level_sst_ids,
+                lower_level,
+                lower_level_sst_ids,
+                ..
+            }) => {
+                debug_assert_eq!(*lower_level_sst_ids, snapshot.levels[lower_level - 1].1);
 
-                // now build compacted SSTs from the iterator
-                let mut compacted = Vec::new();
-                let mut add_table = |builder: SsTableBuilder| -> Result<()> {
-                    let id = self.next_sst_id();
-                    let path = self.path_of_sst(id);
-                    let sst = Arc::new(builder.build(id, Some(self.block_cache.clone()), path)?);
-                    compacted.push(sst);
-                    Ok(())
-                };
+                if let Some(upper_level) = upper_level {
+                    debug_assert!(1 <= *upper_level);
+                    debug_assert_eq!(*lower_level, *upper_level + 1);
+                    debug_assert_eq!(*upper_level_sst_ids, snapshot.levels[*upper_level - 1].1);
 
-                let mut builder = None;
-                while iter.is_valid() {
-                    if builder.is_none() {
-                        builder = Some(SsTableBuilder::new(self.options.block_size));
-                    }
+                    let upper_iter = SstConcatIterator::create_and_seek_to_first(
+                        upper_level_sst_ids
+                            .iter()
+                            .map(|i| Arc::clone(&snapshot.sstables[i]))
+                            .collect(),
+                    )?;
+                    let lower_iter = SstConcatIterator::create_and_seek_to_first(
+                        lower_level_sst_ids
+                            .iter()
+                            .map(|i| Arc::clone(&snapshot.sstables[i]))
+                            .collect(),
+                    )?;
+                    let iter = TwoMergeIterator::create(upper_iter, lower_iter)?;
+                    self.sst_from_iter(iter)
+                } else {
+                    debug_assert_eq!(*lower_level, 1);
+                    debug_assert_eq!(*upper_level_sst_ids, snapshot.l0_sstables);
 
-                    // append the tuple
-                    let builder_mut = builder.as_mut().unwrap();
-                    let (key, value) = (iter.key(), iter.value());
-                    if !value.is_empty() {
-                        builder_mut.add(key, value);
-                    }
-                    iter.next()?;
-
-                    if self.options.target_sst_size <= builder_mut.estimated_size() {
-                        add_table(builder.take().unwrap())?;
-                    }
+                    let upper_iter = MergeIterator::create(
+                        upper_level_sst_ids
+                            .iter()
+                            .map(|i| {
+                                let table = Arc::clone(&snapshot.sstables[i]);
+                                let iter = SsTableIterator::create_and_seek_to_first(table)?;
+                                Ok(Box::new(iter))
+                            })
+                            .collect::<Result<Vec<_>>>()?,
+                    );
+                    let lower_iter = SstConcatIterator::create_and_seek_to_first(
+                        lower_level_sst_ids
+                            .iter()
+                            .map(|i| Arc::clone(&snapshot.sstables[i]))
+                            .collect(),
+                    )?;
+                    let iter = TwoMergeIterator::create(upper_iter, lower_iter)?;
+                    self.sst_from_iter(iter)
                 }
-                if let Some(builder) = builder {
-                    add_table(builder)?;
-                }
-
-                Ok(compacted)
             }
             _ => {
                 unimplemented!();
@@ -207,34 +229,72 @@ impl LsmStorageInner {
         let compacted = self.compact(&snapshot, &task)?;
         drop(snapshot);
 
-        let state_lock = self.state_lock.lock();
-        let mut new_state = self.state.read().as_ref().clone();
-        assert_eq!(l0_sstables, new_state.l0_sstables);
-        assert_eq!(l1_sstables, new_state.levels[0].1);
+        {
+            let _state_lock = self.state_lock.lock();
+            let mut new_state = self.state.read().as_ref().clone();
+            assert_eq!(l0_sstables, new_state.l0_sstables);
+            assert_eq!(l1_sstables, new_state.levels[0].1);
 
-        // remove all L0 + L1 SSTs
-        for i in l0_sstables.iter().chain(l1_sstables.iter()) {
-            new_state.sstables.remove(i).unwrap();
+            // remove all L0 + L1 SSTs
+            for i in l0_sstables.iter().chain(l1_sstables.iter()) {
+                new_state.sstables.remove(i).unwrap();
+            }
+
+            // insert compacted SSTs to L1
+            let mut new_l1_sstables = Vec::with_capacity(compacted.len());
+            for sst in compacted {
+                let id = sst.sst_id();
+                new_state.sstables.insert(id, sst);
+                new_l1_sstables.push(id);
+            }
+            new_state.l0_sstables.clear();
+            new_state.levels[0].1 = new_l1_sstables;
+
+            // update state
+            *self.state.write() = Arc::new(new_state);
         }
-
-        // insert compacted SSTs to L1
-        let mut new_l1_sstables = Vec::with_capacity(compacted.len());
-        for sst in compacted {
-            let id = sst.sst_id();
-            new_state.sstables.insert(id, sst);
-            new_l1_sstables.push(id);
-        }
-        new_state.l0_sstables.clear();
-        new_state.levels[0].1 = new_l1_sstables;
-
-        // update state
-        *self.state.write() = Arc::new(new_state);
 
         Ok(())
     }
 
     fn trigger_compaction(&self) -> Result<()> {
-        unimplemented!()
+        let snapshot = self.state.read().clone();
+        let Some(task) = self
+            .compaction_controller
+            .generate_compaction_task(&snapshot)
+        else {
+            // if no task needs to be scheduled, return ok
+            return Ok(());
+        };
+
+        // run the compaction and get a list of new SSTs
+        let compacted = self.compact(&snapshot, &task)?;
+        drop(snapshot);
+
+        {
+            let _state_lock = self.state_lock.lock();
+            let (mut new_state, removed) = self.compaction_controller.apply_compaction_result(
+                &self.state.read(),
+                &task,
+                &compacted.iter().map(|t| t.sst_id()).collect::<Vec<_>>(),
+                false, // TODO: figure out what `in_recovery` even is 😥
+            );
+
+            for removed in removed {
+                let result = new_state.sstables.remove(&removed);
+                debug_assert!(result.is_some());
+            }
+            for compacted in compacted {
+                let id = compacted.sst_id();
+                let result = new_state.sstables.insert(id, compacted);
+                debug_assert!(result.is_none());
+            }
+
+            // update state
+            *self.state.write() = Arc::new(new_state);
+        }
+
+        Ok(())
     }
 
     pub(crate) fn spawn_compaction_thread(
@@ -263,7 +323,7 @@ impl LsmStorageInner {
     }
 
     fn trigger_flush(&self) -> Result<()> {
-        // should flush if the number of memtables exceed the limit
+        // should flush if the number of memtables exceeds the limit
         if self.options.num_memtable_limit < 1 + self.state.read().imm_memtables.len() {
             self.force_flush_next_imm_memtable()?;
         }
@@ -288,5 +348,43 @@ impl LsmStorageInner {
             }
         });
         Ok(Some(handle))
+    }
+
+    fn sst_from_iter(
+        &self,
+        mut iter: impl for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>,
+    ) -> Result<Vec<Arc<SsTable>>> {
+        let mut compacted = Vec::new();
+
+        let mut builder = None;
+        while iter.is_valid() {
+            if builder.is_none() {
+                builder = Some(SsTableBuilder::new(self.options.block_size));
+            }
+
+            // append the tuple
+            let builder_mut = builder.as_mut().unwrap();
+            let (key, value) = (iter.key(), iter.value());
+            if !value.is_empty() {
+                builder_mut.add(key, value);
+            }
+            iter.next()?;
+
+            if self.options.target_sst_size <= builder_mut.estimated_size() {
+                let builder = builder.take().unwrap();
+                let id = self.next_sst_id();
+                let path = self.path_of_sst(id);
+                let sst = Arc::new(builder.build(id, Some(self.block_cache.clone()), path)?);
+                compacted.push(sst);
+            }
+        }
+        if let Some(builder) = builder {
+            let id = self.next_sst_id();
+            let path = self.path_of_sst(id);
+            let sst = Arc::new(builder.build(id, Some(self.block_cache.clone()), path)?);
+            compacted.push(sst);
+        }
+
+        Ok(compacted)
     }
 }
