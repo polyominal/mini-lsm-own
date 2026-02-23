@@ -180,12 +180,25 @@ impl Drop for MiniLsm {
 
 impl MiniLsm {
     pub fn close(&self) -> Result<()> {
+        self.inner.sync_dir()?;
+        self.compaction_notifier.send(())?;
+        self.flush_notifier.send(())?;
+
+        // join compaction and flush threads
+        self.compaction_thread
+            .lock()
+            .take()
+            .ok_or(anyhow!("compaction thread already moved out???"))?
+            .join()
+            .map_err(|_| anyhow!("failed to join compaction thread"))?;
         self.flush_thread
             .lock()
             .take()
-            .ok_or(anyhow!("flush_thread already moved out???"))?
+            .ok_or(anyhow!("flush thread already moved out???"))?
             .join()
-            .map_err(|_| anyhow!("failed to join flush thread"))
+            .map_err(|_| anyhow!("failed to join flush thread"))?;
+
+        Ok(())
     }
 
     /// Start the storage engine by either loading an existing directory or creating a new one if the directory does
@@ -420,7 +433,8 @@ impl LsmStorageInner {
     }
 
     pub(super) fn sync_dir(&self) -> Result<()> {
-        unimplemented!()
+        std::fs::File::open(&self.path)?.sync_all()?;
+        Ok(())
     }
 
     /// Force freeze the current memtable to an immutable memtable
