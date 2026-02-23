@@ -40,6 +40,7 @@ use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::key::KeySlice;
 use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::Manifest;
+use crate::manifest::ManifestRecord;
 use crate::mem_table::MemTable;
 use crate::mem_table::map_bound;
 use crate::mvcc::LsmMvccInner;
@@ -180,7 +181,6 @@ impl Drop for MiniLsm {
 
 impl MiniLsm {
     pub fn close(&self) -> Result<()> {
-        self.inner.sync_dir()?;
         self.compaction_notifier.send(())?;
         self.flush_notifier.send(())?;
 
@@ -197,6 +197,18 @@ impl MiniLsm {
             .ok_or(anyhow!("flush thread already moved out???"))?
             .join()
             .map_err(|_| anyhow!("failed to join flush thread"))?;
+
+        if !self.inner.state.read().memtable.is_empty() {
+            // force flush memtable
+            // TODO
+        }
+        loop {
+            let snapshot = self.inner.state.read();
+            if snapshot.imm_memtables.is_empty() {
+                break;
+            }
+            self.inner.force_flush_next_imm_memtable()?;
+        }
 
         Ok(())
     }
@@ -289,6 +301,14 @@ impl LsmStorageInner {
         if !path.exists() {
             std::fs::create_dir(path)?;
         }
+        let manifest_path = path.join("manifest");
+        let manifest = {
+            if !manifest_path.exists() {
+                Manifest::create(&manifest_path)?
+            } else {
+                todo!()
+            }
+        };
 
         let state = LsmStorageState::create(&options);
 
@@ -312,7 +332,7 @@ impl LsmStorageInner {
             block_cache: Arc::new(BlockCache::new(1024)),
             next_sst_id: AtomicUsize::new(1),
             compaction_controller,
-            manifest: None,
+            manifest: Some(manifest),
             options: options.into(),
             mvcc: None,
             compaction_filters: Arc::new(Mutex::new(Vec::new())),
@@ -493,6 +513,12 @@ impl LsmStorageInner {
         // update state
         *guard = Arc::new(snapshot);
         drop(guard);
+
+        // flush to disk 🤡
+        self.manifest
+            .as_ref()
+            .unwrap()
+            .add_record(&state_lock, ManifestRecord::Flush(sst_id))?;
 
         Ok(())
     }
