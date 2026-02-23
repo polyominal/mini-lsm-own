@@ -384,7 +384,18 @@ impl LsmStorageInner {
         let snapshot = Arc::clone(&self.state.read());
         snapshot.memtable.put(key, value)?;
 
-        self.check_freeze(snapshot.memtable.approximate_size())
+        if snapshot.memtable.approximate_size() < self.options.target_sst_size {
+            return Ok(());
+        }
+
+        // so it might be full. acquire the state lock and force freeze
+        let state_lock = self.state_lock.lock();
+
+        if self.options.target_sst_size <= self.state.read().memtable.approximate_size() {
+            self.force_freeze_memtable(&state_lock)
+        } else {
+            Ok(())
+        }
     }
 
     /// Remove a key from the storage by writing an empty value.
@@ -410,26 +421,6 @@ impl LsmStorageInner {
 
     pub(super) fn sync_dir(&self) -> Result<()> {
         unimplemented!()
-    }
-
-    fn should_freeze(&self, size_snapshot: usize) -> bool {
-        self.options.target_sst_size <= size_snapshot
-    }
-
-    /// Call this after any updates the current memtable
-    fn check_freeze(&self, size_snapshot: usize) -> Result<()> {
-        if !self.should_freeze(size_snapshot) {
-            return Ok(());
-        }
-
-        // so it might be full. acquire the state lock and force freeze
-        let state_lock = self.state_lock.lock();
-
-        if self.should_freeze(self.state.read().memtable.approximate_size()) {
-            self.force_freeze_memtable(&state_lock)
-        } else {
-            Ok(())
-        }
     }
 
     /// Force freeze the current memtable to an immutable memtable
