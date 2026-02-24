@@ -306,6 +306,7 @@ impl LsmStorageInner {
             if !manifest_path.exists() {
                 Manifest::create(&manifest_path)?
             } else {
+                eprintln!("???");
                 todo!()
             }
         };
@@ -458,8 +459,9 @@ impl LsmStorageInner {
     }
 
     /// Force freeze the current memtable to an immutable memtable
-    pub fn force_freeze_memtable(&self, _state_lock_observer: &MutexGuard<'_, ()>) -> Result<()> {
-        let new_memtable = Arc::new(MemTable::create(self.next_sst_id()));
+    pub fn force_freeze_memtable(&self, state_lock_observer: &MutexGuard<'_, ()>) -> Result<()> {
+        let new_id = self.next_sst_id();
+        let new_memtable = Arc::new(MemTable::create(new_id));
 
         let mut guard = self.state.write();
         let mut snapshot = guard.as_ref().clone();
@@ -471,6 +473,11 @@ impl LsmStorageInner {
         // update state
         *guard = Arc::new(snapshot);
         drop(guard);
+
+        self.manifest
+            .as_ref()
+            .unwrap()
+            .add_record(state_lock_observer, ManifestRecord::NewMemtable(new_id))?;
 
         Ok(())
     }
@@ -513,6 +520,8 @@ impl LsmStorageInner {
         // update state
         *guard = Arc::new(snapshot);
         drop(guard);
+
+        self.sync_dir()?;
 
         // flush to disk 🤡
         self.manifest
