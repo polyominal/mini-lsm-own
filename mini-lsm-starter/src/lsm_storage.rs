@@ -307,8 +307,9 @@ impl LsmStorageInner {
             if !manifest_path.exists() {
                 Manifest::create(&manifest_path)?
             } else {
-                eprintln!("???");
-                todo!()
+                let (manifest, records) = Manifest::recover(&manifest_path)?;
+                eprintln!("records: {records:?}");
+                todo!();
             }
         };
 

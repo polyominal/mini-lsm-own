@@ -12,10 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
-
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -29,7 +26,7 @@ pub struct Manifest {
     file: Arc<Mutex<File>>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum ManifestRecord {
     Flush(usize),
     NewMemtable(usize),
@@ -38,17 +35,26 @@ pub enum ManifestRecord {
 
 impl Manifest {
     pub fn create(path: impl AsRef<Path>) -> Result<Self> {
-        let file = std::fs::OpenOptions::new()
-            .create_new(true)
-            .read(true)
-            .write(true)
-            .open(path)?;
-        let file = Arc::new(Mutex::new(file));
+        let file = Arc::new(Mutex::new(
+            OpenOptions::new()
+                .create_new(true)
+                .read(true)
+                .write(true)
+                .open(path)?,
+        ));
         Ok(Self { file })
     }
 
-    pub fn recover(_path: impl AsRef<Path>) -> Result<(Self, Vec<ManifestRecord>)> {
-        unimplemented!()
+    pub fn recover(path: impl AsRef<Path>) -> Result<(Self, Vec<ManifestRecord>)> {
+        let file = OpenOptions::new().read(true).append(true).open(path)?;
+        let mut records = Vec::new();
+        let stream = serde_json::Deserializer::from_reader(std::io::BufReader::new(&file))
+            .into_iter::<ManifestRecord>();
+        for x in stream {
+            records.push(x?);
+        }
+        let file = Arc::new(Mutex::new(file));
+        Ok((Self { file }, records))
     }
 
     pub fn add_record(
