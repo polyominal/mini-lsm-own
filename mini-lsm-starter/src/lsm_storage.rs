@@ -200,15 +200,16 @@ impl MiniLsm {
 
         if !self.inner.state.read().memtable.is_empty() {
             // force flush memtable
-            // TODO
+            self.inner
+                .freeze_with_memtbale(MemTable::create(self.inner.next_sst_id()));
         }
         loop {
-            let snapshot = self.inner.state.read();
-            if snapshot.imm_memtables.is_empty() {
+            if self.inner.state.read().imm_memtables.is_empty() {
                 break;
             }
             self.inner.force_flush_next_imm_memtable()?;
         }
+        self.inner.sync_dir()?;
 
         Ok(())
     }
@@ -458,21 +459,22 @@ impl LsmStorageInner {
         Ok(())
     }
 
-    /// Force freeze the current memtable to an immutable memtable
-    pub fn force_freeze_memtable(&self, state_lock_observer: &MutexGuard<'_, ()>) -> Result<()> {
-        let new_id = self.next_sst_id();
-        let new_memtable = Arc::new(MemTable::create(new_id));
-
+    pub fn freeze_with_memtbale(&self, table: MemTable) {
         let mut guard = self.state.write();
         let mut snapshot = guard.as_ref().clone();
-        let old_memtable = mem::replace(&mut snapshot.memtable, new_memtable);
+        let old_memtable = mem::replace(&mut snapshot.memtable, Arc::new(table));
 
         // add the memtable to the list of immutable memtables
         snapshot.imm_memtables.insert(0, old_memtable.clone());
 
         // update state
         *guard = Arc::new(snapshot);
-        drop(guard);
+    }
+
+    /// Force freeze the current memtable to an immutable memtable
+    pub fn force_freeze_memtable(&self, state_lock_observer: &MutexGuard<'_, ()>) -> Result<()> {
+        let new_id = self.next_sst_id();
+        self.freeze_with_memtbale(MemTable::create(new_id));
 
         self.manifest
             .as_ref()
