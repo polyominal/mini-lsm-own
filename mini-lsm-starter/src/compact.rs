@@ -36,6 +36,7 @@ use crate::iterators::merge_iterator::MergeIterator;
 use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::key::KeySlice;
 use crate::lsm_storage::{LsmStorageInner, LsmStorageState};
+use crate::manifest::ManifestRecord;
 use crate::table::{SsTable, SsTableBuilder, SsTableIterator};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -271,28 +272,34 @@ impl LsmStorageInner {
         let compacted = self.compact(&snapshot, &task)?;
         drop(snapshot);
 
-        {
-            let _state_lock = self.state_lock.lock();
-            let (mut new_state, removed) = self.compaction_controller.apply_compaction_result(
-                &self.state.read(),
-                &task,
-                &compacted.iter().map(|t| t.sst_id()).collect::<Vec<_>>(),
-                false, // TODO: figure out what `in_recovery` even is 😥
-            );
+        let state_lock = self.state_lock.lock();
+        let (mut new_state, removed) = self.compaction_controller.apply_compaction_result(
+            &self.state.read(),
+            &task,
+            &compacted.iter().map(|t| t.sst_id()).collect::<Vec<_>>(),
+            false, // TODO: figure out what `in_recovery` even is 😥
+        );
 
-            for removed in removed {
-                let result = new_state.sstables.remove(&removed);
-                debug_assert!(result.is_some());
-            }
-            for compacted in compacted {
-                let id = compacted.sst_id();
-                let result = new_state.sstables.insert(id, compacted);
-                debug_assert!(result.is_none());
-            }
-
-            // update state
-            *self.state.write() = Arc::new(new_state);
+        for removed in removed {
+            let result = new_state.sstables.remove(&removed);
+            debug_assert!(result.is_some());
         }
+        let mut new_ids = Vec::with_capacity(compacted.len());
+        for compacted in compacted {
+            let id = compacted.sst_id();
+            new_ids.push(id);
+            let result = new_state.sstables.insert(id, compacted);
+            debug_assert!(result.is_none());
+        }
+
+        // update state
+        *self.state.write() = Arc::new(new_state);
+
+        self.sync_dir()?;
+        self.manifest
+            .as_ref()
+            .unwrap()
+            .add_record(&state_lock, ManifestRecord::Compaction(task, new_ids))?;
 
         Ok(())
     }

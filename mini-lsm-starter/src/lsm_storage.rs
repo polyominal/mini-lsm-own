@@ -40,6 +40,7 @@ use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::key::KeySlice;
 use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::Manifest;
+use crate::manifest::ManifestRecord;
 use crate::mem_table::MemTable;
 use crate::mem_table::map_bound;
 use crate::mvcc::LsmMvccInner;
@@ -180,12 +181,37 @@ impl Drop for MiniLsm {
 
 impl MiniLsm {
     pub fn close(&self) -> Result<()> {
+        self.compaction_notifier.send(())?;
+        self.flush_notifier.send(())?;
+
+        // join compaction and flush threads
+        self.compaction_thread
+            .lock()
+            .take()
+            .ok_or(anyhow!("compaction thread already moved out???"))?
+            .join()
+            .map_err(|_| anyhow!("failed to join compaction thread"))?;
         self.flush_thread
             .lock()
             .take()
-            .ok_or(anyhow!("flush_thread already moved out???"))?
+            .ok_or(anyhow!("flush thread already moved out???"))?
             .join()
-            .map_err(|_| anyhow!("failed to join flush thread"))
+            .map_err(|_| anyhow!("failed to join flush thread"))?;
+
+        if !self.inner.state.read().memtable.is_empty() {
+            // force flush memtable
+            self.inner
+                .freeze_with_memtbale(MemTable::create(self.inner.next_sst_id()));
+        }
+        loop {
+            if self.inner.state.read().imm_memtables.is_empty() {
+                break;
+            }
+            self.inner.force_flush_next_imm_memtable()?;
+        }
+        self.inner.sync_dir()?;
+
+        Ok(())
     }
 
     /// Start the storage engine by either loading an existing directory or creating a new one if the directory does
@@ -276,6 +302,16 @@ impl LsmStorageInner {
         if !path.exists() {
             std::fs::create_dir(path)?;
         }
+        let manifest_path = path.join("manifest");
+        let manifest = {
+            if !manifest_path.exists() {
+                Manifest::create(&manifest_path)?
+            } else {
+                let (manifest, records) = Manifest::recover(&manifest_path)?;
+                eprintln!("records: {records:?}");
+                todo!();
+            }
+        };
 
         let state = LsmStorageState::create(&options);
 
@@ -299,7 +335,7 @@ impl LsmStorageInner {
             block_cache: Arc::new(BlockCache::new(1024)),
             next_sst_id: AtomicUsize::new(1),
             compaction_controller,
-            manifest: None,
+            manifest: Some(manifest),
             options: options.into(),
             mvcc: None,
             compaction_filters: Arc::new(Mutex::new(Vec::new())),
@@ -420,23 +456,31 @@ impl LsmStorageInner {
     }
 
     pub(super) fn sync_dir(&self) -> Result<()> {
-        unimplemented!()
+        std::fs::File::open(&self.path)?.sync_all()?;
+        Ok(())
     }
 
-    /// Force freeze the current memtable to an immutable memtable
-    pub fn force_freeze_memtable(&self, _state_lock_observer: &MutexGuard<'_, ()>) -> Result<()> {
-        let new_memtable = Arc::new(MemTable::create(self.next_sst_id()));
-
+    pub fn freeze_with_memtbale(&self, table: MemTable) {
         let mut guard = self.state.write();
         let mut snapshot = guard.as_ref().clone();
-        let old_memtable = mem::replace(&mut snapshot.memtable, new_memtable);
+        let old_memtable = mem::replace(&mut snapshot.memtable, Arc::new(table));
 
         // add the memtable to the list of immutable memtables
         snapshot.imm_memtables.insert(0, old_memtable.clone());
 
         // update state
         *guard = Arc::new(snapshot);
-        drop(guard);
+    }
+
+    /// Force freeze the current memtable to an immutable memtable
+    pub fn force_freeze_memtable(&self, state_lock_observer: &MutexGuard<'_, ()>) -> Result<()> {
+        let new_id = self.next_sst_id();
+        self.freeze_with_memtbale(MemTable::create(new_id));
+
+        self.manifest
+            .as_ref()
+            .unwrap()
+            .add_record(state_lock_observer, ManifestRecord::NewMemtable(new_id))?;
 
         Ok(())
     }
@@ -479,6 +523,14 @@ impl LsmStorageInner {
         // update state
         *guard = Arc::new(snapshot);
         drop(guard);
+
+        self.sync_dir()?;
+
+        // flush to disk 🤡
+        self.manifest
+            .as_ref()
+            .unwrap()
+            .add_record(&state_lock, ManifestRecord::Flush(sst_id))?;
 
         Ok(())
     }
