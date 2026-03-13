@@ -199,18 +199,22 @@ impl MiniLsm {
             .join()
             .map_err(|_| anyhow!("failed to join flush thread"))?;
 
-        if !self.inner.state.read().memtable.is_empty() {
-            // force flush memtable
-            self.inner
-                .freeze_with_memtbale(MemTable::create(self.inner.next_sst_id()));
-        }
-        loop {
-            if self.inner.state.read().imm_memtables.is_empty() {
-                break;
+        if !self.inner.options.enable_wal {
+            // if WAL is not enabled, flush all memtables to the disk before closing
+
+            if !self.inner.state.read().memtable.is_empty() {
+                // force flush memtable
+                self.inner
+                    .freeze_with_memtbale(MemTable::create(self.inner.next_sst_id()));
             }
-            self.inner.force_flush_next_imm_memtable()?;
+            loop {
+                if self.inner.state.read().imm_memtables.is_empty() {
+                    break;
+                }
+                self.inner.force_flush_next_imm_memtable()?;
+            }
+            self.inner.sync_dir()?;
         }
-        self.inner.sync_dir()?;
 
         Ok(())
     }
