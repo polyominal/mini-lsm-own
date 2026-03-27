@@ -357,8 +357,12 @@ impl LsmStorageInner {
                             next_sst_id = next_sst_id.max(x);
                             memtables.insert(x);
                         }
-                        ManifestRecord::Compaction(_task, _output) => {
-                            // TODO: handle compaction - skip for now per user's request
+                        ManifestRecord::Compaction(task, output) => {
+                            let (new_state, _) = compaction_controller
+                                .apply_compaction_result(&state, &task, &output, true);
+                            state = new_state;
+                            next_sst_id =
+                                next_sst_id.max(output.iter().max().copied().unwrap_or_default());
                         }
                     }
                 }
@@ -608,8 +612,13 @@ impl LsmStorageInner {
         // make sure we're removing the right table
         debug_assert_eq!(table_to_flush.id(), sst_id);
 
-        // add to the list of L0-SSTs
-        snapshot.l0_sstables.insert(0, sst_id);
+        // add to the list of L0-SSTs or levels depending on compaction strategy
+        if self.compaction_controller.flush_to_l0() {
+            snapshot.l0_sstables.insert(0, sst_id);
+        } else {
+            // For tiered compaction, create a new tier
+            snapshot.levels.insert(0, (sst_id, vec![sst_id]));
+        }
         snapshot.sstables.insert(sst_id, sst);
 
         // update state
