@@ -339,8 +339,13 @@ impl LsmStorageInner {
                         ManifestRecord::NewMemtable(_) => {
                             todo!();
                         }
+                        // [IMPLEMENTED VIA KIMI CODE] Handle compaction record during recovery
                         ManifestRecord::Compaction(task, output) => {
-                            todo!();
+                            let (new_state, _) = compaction_controller
+                                .apply_compaction_result(&state, &task, &output, true);
+                            state = new_state;
+                            next_sst_id =
+                                next_sst_id.max(output.iter().max().copied().unwrap_or_default());
                         }
                     }
                 }
@@ -547,8 +552,14 @@ impl LsmStorageInner {
         // make sure we're removing the right table
         debug_assert_eq!(table_to_flush.id(), sst_id);
 
-        // add to the list of L0-SSTs
-        snapshot.l0_sstables.insert(0, sst_id);
+        // [IMPLEMENTED VIA KIMI CODE] Handle tiered compaction (flush to tiers instead of L0)
+        if self.compaction_controller.flush_to_l0() {
+            // add to the list of L0-SSTs
+            snapshot.l0_sstables.insert(0, sst_id);
+        } else {
+            // For tiered compaction, create a new tier
+            snapshot.levels.insert(0, (sst_id, vec![sst_id]));
+        }
         snapshot.sstables.insert(sst_id, sst);
 
         // update state
