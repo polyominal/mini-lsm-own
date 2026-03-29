@@ -156,22 +156,24 @@ impl LsmStorageInner {
                         .collect(),
                 )?;
                 let iter = TwoMergeIterator::create(l0_iter, l1_iter)?;
-                self.sst_from_iter(iter)
+                self.sst_from_iter(iter, task.compact_to_bottom_level())
             }
+            // [IMPLEMENTED VIA KIMI CODE] Handle Simple and Leveled compaction tasks
             CompactionTask::Simple(SimpleLeveledCompactionTask {
                 upper_level,
                 upper_level_sst_ids,
                 lower_level,
                 lower_level_sst_ids,
                 ..
+            })
+            | CompactionTask::Leveled(LeveledCompactionTask {
+                upper_level,
+                upper_level_sst_ids,
+                lower_level,
+                lower_level_sst_ids,
+                ..
             }) => {
-                debug_assert_eq!(*lower_level_sst_ids, snapshot.levels[lower_level - 1].1);
-
                 if let Some(upper_level) = upper_level {
-                    debug_assert!(1 <= *upper_level);
-                    debug_assert_eq!(*lower_level, *upper_level + 1);
-                    debug_assert_eq!(*upper_level_sst_ids, snapshot.levels[*upper_level - 1].1);
-
                     let upper_iter = SstConcatIterator::create_and_seek_to_first(
                         upper_level_sst_ids
                             .iter()
@@ -185,11 +187,8 @@ impl LsmStorageInner {
                             .collect(),
                     )?;
                     let iter = TwoMergeIterator::create(upper_iter, lower_iter)?;
-                    self.sst_from_iter(iter)
+                    self.sst_from_iter(iter, task.compact_to_bottom_level())
                 } else {
-                    debug_assert_eq!(*lower_level, 1);
-                    debug_assert_eq!(*upper_level_sst_ids, snapshot.l0_sstables);
-
                     let upper_iter = MergeIterator::create(
                         upper_level_sst_ids
                             .iter()
@@ -207,11 +206,20 @@ impl LsmStorageInner {
                             .collect(),
                     )?;
                     let iter = TwoMergeIterator::create(upper_iter, lower_iter)?;
-                    self.sst_from_iter(iter)
+                    self.sst_from_iter(iter, task.compact_to_bottom_level())
                 }
             }
-            _ => {
-                unimplemented!();
+            // [IMPLEMENTED VIA KIMI CODE] Handle Tiered compaction task
+            CompactionTask::Tiered(TieredCompactionTask { tiers, .. }) => {
+                let mut iters = Vec::with_capacity(tiers.len());
+                for (_, tier_sst_ids) in tiers {
+                    let mut ssts = Vec::with_capacity(tier_sst_ids.len());
+                    for id in tier_sst_ids.iter() {
+                        ssts.push(Arc::clone(&snapshot.sstables[id]));
+                    }
+                    iters.push(Box::new(SstConcatIterator::create_and_seek_to_first(ssts)?));
+                }
+                self.sst_from_iter(MergeIterator::create(iters), task.compact_to_bottom_level())
             }
         }
     }
@@ -258,6 +266,7 @@ impl LsmStorageInner {
         Ok(())
     }
 
+    // [IMPLEMENTED VIA KIMI CODE] Restructured to insert SSTs before apply_compaction_result
     fn trigger_compaction(&self) -> Result<()> {
         let snapshot = self.state.read().clone();
         let Some(task) = self
@@ -273,23 +282,22 @@ impl LsmStorageInner {
         drop(snapshot);
 
         let state_lock = self.state_lock.lock();
-        let (mut new_state, removed) = self.compaction_controller.apply_compaction_result(
-            &self.state.read(),
-            &task,
-            &compacted.iter().map(|t| t.sst_id()).collect::<Vec<_>>(),
-            false, // TODO: figure out what `in_recovery` even is 😥
-        );
-
-        for removed in removed {
-            let result = new_state.sstables.remove(&removed);
-            debug_assert!(result.is_some());
-        }
+        // First, insert the new SSTs into the state so that apply_compaction_result
+        // can access them for sorting (needed by leveled compaction)
+        let mut snapshot = self.state.read().as_ref().clone();
         let mut new_ids = Vec::with_capacity(compacted.len());
-        for compacted in compacted {
-            let id = compacted.sst_id();
-            new_ids.push(id);
-            let result = new_state.sstables.insert(id, compacted);
+        for file_to_add in compacted {
+            new_ids.push(file_to_add.sst_id());
+            let result = snapshot.sstables.insert(file_to_add.sst_id(), file_to_add);
             debug_assert!(result.is_none());
+        }
+        let (mut new_state, files_to_remove) = self
+            .compaction_controller
+            .apply_compaction_result(&snapshot, &task, &new_ids, false);
+
+        for file_to_remove in files_to_remove {
+            let result = new_state.sstables.remove(&file_to_remove);
+            debug_assert!(result.is_some(), "cannot remove {}.sst", file_to_remove);
         }
 
         // update state
@@ -357,9 +365,13 @@ impl LsmStorageInner {
         Ok(Some(handle))
     }
 
+    /// Generate SSTs from an iterator.
+    ///
+    /// [IMPLEMENTED VIA KIMI CODE] Added compact_to_bottom_level parameter to filter tombstones
     fn sst_from_iter(
         &self,
         mut iter: impl for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>,
+        compact_to_bottom_level: bool,
     ) -> Result<Vec<Arc<SsTable>>> {
         let mut compacted = Vec::new();
 
@@ -372,7 +384,12 @@ impl LsmStorageInner {
             // append the tuple
             let builder_mut = builder.as_mut().unwrap();
             let (key, value) = (iter.key(), iter.value());
-            if !value.is_empty() {
+            // Filter out tombstones (empty values) when compacting to bottom level
+            if compact_to_bottom_level {
+                if !value.is_empty() {
+                    builder_mut.add(key, value);
+                }
+            } else {
                 builder_mut.add(key, value);
             }
             iter.next()?;
